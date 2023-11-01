@@ -1,0 +1,15 @@
+{
+    "Grid_positive_limits":[-60, -1.5, -60],
+    "Grid_negative_limits":[60, 1.5, 60],
+    "Grid_resolution":[512, 16, 512],
+    "Trapping_frequencies":[20, 300, 20],
+    "Total_simulation_time":150e-3,
+    "dt":5e-7,
+    "snapshots":150,
+    "repetitive":1,
+    "vortex_charge":[2,2,5],
+    "vortex_position_x":[0],
+    "vortex_position_y":[0],
+    "period_of_reimprint":[20,30,40],
+    "max_imprints":[2,3,4]
+}

@@ -1,0 +1,227 @@
+# -*- coding: utf-8 -*-
+import math
+import numpy as np
+import torch
+import pandas as pd
+import matplotlib.pyplot as plt
+
+###############################################################################
+###############   CONSTANTS DO NOT CHANGE #####################################
+###############################################################################
+
+pi= 3.141592653589793238
+elec=1.60217653e-19
+hbar= 1.054572e-34            # J*s
+amu= 1.66053873e-27           # Kg (atomic mass unit)
+a_bohr= 0.5291772083e-10      # m
+m1=87*amu                 # Rubidium mass Kg
+m2=41*amu                 # Calcium mass Kg
+mass_ratio=m1/m2
+g=9.81
+
+##############################################################################
+##############    UTILITY FUNCTIONS    #######################################
+##############################################################################
+
+def read_ground_state(data, psi1, n1, n2, n3):
+    """
+    Loads the ground state from a text file into a torch.tensor.
+
+    Parameters
+    ----------
+    data : .dat file
+        Contains the ground state of the GPE
+        as has been calculated for the specific potential.
+
+    Returns
+    -------
+    data as a numpy matrix.
+
+    """
+    matrix = pd.read_csv(data, header=None, names=['modulus', 'phase'])
+    matrix.modulus = matrix.modulus.str.strip(' (')
+    matrix.phase = matrix.phase.str.strip(' )')
+    matrix = matrix.astype(np.float64)
+
+    psi1 = matrix.iloc[:,0] + matrix.iloc[:,1]*1j
+    psi1 = psi1.values
+    psi1 = psi1.reshape((n1,n2,n3))
+
+    return psi1
+
+def init_state(x1, x2, x3, p1, p2, p3, x_min, x_max, dx, dp, w, n1, n2, n3, uext1):
+    """
+    Initialises the grid for x and p spaces
+    and the external potential
+
+    Returns
+    -------
+    uext1, x1, x2, x3, p1, p2, p3
+
+    """
+    # Build space and momentum grids
+    x1 = x_min[0] + torch.arange(n1, dtype=torch.float64)*dx[0] # size n1
+    p1[0][:n1//2] = dp[0] * torch.arange(n1//2)
+    p1[0][n1//2:] = dp[0] * (torch.arange(n1//2, n1) - n1)
+
+    x2 = x_min[1] + torch.arange(n2, dtype=torch.float64)*dx[1]
+    p2[0][:n2//2] = dp[1] * torch.arange(n2//2)
+    p2[0][n2//2:] = dp[1] * (torch.arange(n2//2, n2) - n2)
+
+    x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
+    p3[0][:n3//2] = dp[2] * torch.arange(n3//2)
+    p3[0][n3//2:] = dp[2] * (torch.arange(n3//2, n3) - n3)
+
+    # Build the external harmonic potential
+    gx, gy, gz = torch.meshgrid(x1, x2, x3)
+    uext1 = 0.5 * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
+
+    # build the p-space squared. Useful for the FFT later
+    g_px, g_py, g_pz = torch.meshgrid(p1[0], p2[0], p3[0])
+    p_sq = g_px**2 + g_py**2 + g_pz**2
+
+    return uext1, x1, x2, x3, p1, p2, p3, p_sq
+
+def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3):
+    """
+    Prints the vortices on the condensate by modifying the phase of the
+    ground state.
+
+    Parameters
+    ----------
+    vortices : numpy array
+        dimensions : 3 x number_of_vortices
+        1st row: x position
+        2nd row: y position
+        3rd row: vortex charges
+    Returns
+    -------
+    updated phase of the condensate.
+
+    """
+    if vortices is None:
+      return
+    number_of_vortices = vortices.shape[1]
+
+    for n in range(number_of_vortices):
+        vx = vortices[0][n]
+        vz = vortices[1][n]
+        q = vortices[2][n]
+        for i in range(n3):
+          for k in range(n1):
+            if ((i != (vz + n3//2)) or (k >= (vx + n1//2))):
+              y = x3[i]-x3[vz+n3//2]
+              t = x1[k]-x1[vx+n1//2]
+              x = math.sqrt(((t)**2 +(y)**2))+(t)
+              phase[k,:,i] += 2 * q * torch.atan2(y, x)
+            else:
+              phase[k,:,i] += q*pi
+
+    phase[phase.isnan()] = 0+0j
+    return phase
+
+def x_evolution(psi1, utot1, dtau, factor=0.5):
+    """
+    The evolution step in real space.
+    Parameters
+    ----------
+    psi1 : torch.Tensor
+        The wavefunction of the system.
+    utot1 : torch.Tensor
+        The trapping potential
+    dtau : float
+        The time evolution step.
+    factor : float
+        The splitting factor of the split-step
+    Returns
+    -------
+    psi1 : The updated wavefunction.
+    """
+    psi1 = torch.exp(-factor * dtau*(1j) * utot1) * psi1
+    return psi1
+
+def p_evolution(psi1, dtau, p_sq):
+    """
+    The evolution step in momentum space.   
+    Parameters
+    ----------
+    psi1 : torch.Tensor
+        The wavefunction of the system.
+    dtau : float
+        The time evolution step.
+    p_sq : torch.Tensor
+        The momentum space grid.
+    
+    Returns
+    -------
+    psi1 : The updated wavefunction.
+    """
+    psiF = torch.fft.fftn(psi1, norm='forward')
+    psiF = torch.exp(-(1j) * dtau * 0.5 * p_sq) * psiF
+    psi1 = torch.fft.ifftn(psiF, norm='forward')
+    return psi1
+
+def normalize(phi, d_x):
+    """
+        Normalizes the wavefunction.
+    """
+    phi = phi/torch.sqrt(d_x * torch.sum(torch.abs(phi)**2))
+    return phi
+
+
+def update_phase(psi1, phase, n1, n2, n3):
+  """
+    Updates the phase of the wavefunction.
+    
+    Parameters
+    ----------
+    psi1 : torch.Tensor
+    phase : torch.Tensor
+  """
+  psi1 = psi1 * torch.exp(phase*1j)
+  return psi1
+
+def write_psi():
+    pass
+
+def write_data(psi1, count, x1, x3, n1, n3, a_ho):
+    file_name = f'R-{count:003}-cd.dat'
+    with open(file_name, 'w') as f:
+        for i in range(n1):
+            for k in range(n3):
+                first = x1[i] * a_ho * 1e6 # x position
+                second = x3[k] * a_ho * 1e6 # z position
+                third = torch.sum(torch.abs(psi1[i,:,k])**2) # column density
+                f.write(f'{first},{second},{third}\n')
+
+def extract_phase(psi):
+  """
+  Extracts the phase from the wave function.
+
+  Parameters
+  ----------
+  psi : torch.tensor
+    The wavefunction of the condensate.
+  """
+  phase = torch.imag(torch.log(psi/torch.sqrt(torch.abs(psi)**2)))
+  return phase
+
+def add_phase(cur_phase, added_phase):
+  """
+  Adds an extra phase to our current phase. This is the effect of imprinting
+  additional vortices in the current condensate.
+
+  Parameters
+  ----------
+  cur_phase : torch.tensor
+    The current phase of the condensate wavefunction.
+  added_phase : torch.tensor
+    The additional phase due to imprinting.
+
+  Returns
+  -------
+  final_phase : torch.tensor
+    The new updated phase.
+  """
+  final_phase = cur_phase + added_phase
+  return final_phase
