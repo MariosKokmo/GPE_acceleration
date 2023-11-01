@@ -6,7 +6,6 @@ The code automatically utilises CUDA acceleration (GPU) if it is available.
 Current imprinting objects are only vortices.
 There is the possibility of repetitively imprinting vortices into larger and larger objects.
 
-# -*- coding: utf-8 -*-
 '''
 Created on Sat September 9 21:38:24 2023
 
@@ -24,64 +23,17 @@ import os
 from pathlib import Path
 from gpe_library import *
 
-if torch.cuda.is_available():
-    DEVICE = torch.device('cuda')
-else:
-    DEVICE = 'cpu'
-print('Running on ', DEVICE)
-
-##############################################################################
-#####################   GRID PARAMETERS      #################################
-##############################################################################
-ground_state = os.getcwd() + "\\" + '3d-psi_60.dat'
-
-# Grid dimensions
-n1=512
-n2=16
-n3=512
-dim = np.array([n1,n2,n3], dtype=np.float64)
-
-x_min = np.array([-60, -1.5, -60])
-x_max = np.array([60, 1.5, 60])
-
-fx=20
-fz=300
-fy=20
-
-##############################################################################
-##############################################################################
-##############################################################################
-wx = 2*pi*float(fx)
-wy = 2*pi*float(fy)
-wz = 2*pi*float(fz)
-w = np.array([wx,wz,wy])
-
-omega_ho = (wx*wy*wz)**(1/3)
-a_ho = math.sqrt(hbar/m1/omega_ho)  # harmonic potential length scale in meters
-ascat = 99*a_bohr	# scattering length
-nat = 5e+4		# number of atoms
-
-u = 4.*pi*nat*ascat/a_ho # interaction strength
-
-t_evol = 150e-3
-dt = 5e-7
-shots = 150
-dtau = omega_ho*dt
-kmax = int(t_evol//dt)
-
-
-w = w/omega_ho
-x_max = x_max * 1e-6/a_ho
-x_min = x_min * 1e-6/a_ho
-
-dx = (x_max - x_min)/dim
-dp = 2*pi/(x_max - x_min)
-
-d_x = np.prod(dx)
-
-def run_simulation(max_imprints, imprint_again_every, \
-                    charge, vort_x=0, vort_y=0, \
-                      delay_to_first_reimprint=3, repetitive=True):
+def run_simulation(max_imprints,\
+                   imprint_again_every,\
+                   charge,\
+                   vort_x,\
+                   vort_y,\
+                   delay_to_first_reimprint,\
+                   repetitive,\
+                   ground_state,\
+                   device,\
+                   sim_params
+                  ):
   """
   Runs one simulation with specific parameters.
   """
@@ -91,7 +43,9 @@ def run_simulation(max_imprints, imprint_again_every, \
   # snapshots until first imprint, excludes initial vortex
   delay_to_first_reimprint = delay_to_first_reimprint 
   repetitive = repetitive
-
+  
+  grid = sim_params["grid"]
+  n1, n2, n3 = grid
   ##############################################################################
   ##############    VORTEX DATA (to be modified)   #############################
   ##############################################################################
@@ -103,27 +57,41 @@ def run_simulation(max_imprints, imprint_again_every, \
   ##############################################################################
   ##############    EMPTY MATRICES TO FIT DATA    ##############################
   ##############################################################################
-  phase = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=DEVICE)
-  uext1 = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=DEVICE)
-  psi1 = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=DEVICE)
-  x1 = torch.zeros((1,n1), dtype=torch.float64, device=DEVICE)
-  x2 = torch.zeros((1,n2), dtype=torch.float64, device=DEVICE)
-  x3 = torch.zeros((1,n3), dtype=torch.float64, device=DEVICE)
-  p1 = torch.zeros((1,n1), dtype=torch.float64, device=DEVICE)
-  p2 = torch.zeros((1,n2), dtype=torch.float64, device=DEVICE)
-  p3 = torch.zeros((1,n3), dtype=torch.float64, device=DEVICE)
-  p_sq = torch.zeros((n1,n2,n3), dtype=torch.float64, device=DEVICE)
+  phase = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
+  uext1 = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
+  psi1 = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
+  x1 = torch.zeros((1,n1), dtype=torch.float64, device=device)
+  x2 = torch.zeros((1,n2), dtype=torch.float64, device=device)
+  x3 = torch.zeros((1,n3), dtype=torch.float64, device=device)
+  p1 = torch.zeros((1,n1), dtype=torch.float64, device=device)
+  p2 = torch.zeros((1,n2), dtype=torch.float64, device=device)
+  p3 = torch.zeros((1,n3), dtype=torch.float64, device=device)
+  p_sq = torch.zeros((n1,n2,n3), dtype=torch.float64, device=device)
 
   ##############################################################################
   ##############    SET UP THE SIMULATION    ###################################
   ##############################################################################
   # initialize grids and external potential
+  x_min = sim_params["x_min"]
+  x_max = sim_params["x_max"]
+  dx = sim_params["dx"]
+  dp = sim_params["dp"]
+  w = sim_params["w"]
+  kmax = sim_params["kmax"]
+  omega_ho = sim_params["omega_ho"]
+  a_ho = sim_params["a_ho"]
+  shots = sim_params["shots"]
+  dtau = sim_params["dtau"]
+  d_x = sim_params["d_x"]
+  dt = sim_params["dt"]
+  u = sim_params["u"]
+
   uext1, x1, x2, x3, p1, p2, p3, p_sq = init_state(x1, x2, x3, p1, p2, p3, x_min, x_max, dx, dp, w, n1, n2, n3, uext1)
-  uext1 = uext1.to(device=DEVICE)
+  uext1 = uext1.to(device=device)
 
   # read the ground state
   psi1 = read_ground_state(ground_state, psi1, n1, n2, n3) # shape (n1,n2,n3) complex
-  psi1 = torch.tensor(psi1, device=DEVICE) # dtype complex128
+  psi1 = torch.tensor(psi1, device=device) # dtype complex128
 
   # calculate the phase needed to imprint the vortices on the ground state (takes a while because of the for loops)
   phase = imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3)
@@ -166,34 +134,7 @@ def run_simulation(max_imprints, imprint_again_every, \
     psi1 = x_evolution(psi1, utot1, dtau)
     psi1 = p_evolution(psi1, dtau, p_sq)
     psi1 = x_evolution(psi1, utot1, dtau)
-
     psi1 = normalize(psi1, d_x)
 
-
 ##########################################################################################
 ##########################################################################################
-
-if __name__ == '__main__':
-  # imprint the batch every this number of snapshots
-  imprint_again_every = [15, 20, 40, 50, 40, 50] 
-  max_imprints = [2, 5, 2, 2, 1, 2]
-  charges = [2, 2, 5, 5, 10, 10]
-  parameters_list = zip(max_imprints, imprint_again_every, charges)
-  # create folders of simulations
-  simulations = []
-  for parameters in parameters_list:
-    imprints, every, charge = parameters
-    simulation_name = f'1vortex__batch{charge}__total_imprints{imprints}__every{every}_fps10'
-    simulations.append(simulation_name)
-    print("creating folder: ", simulation_name)
-    if not os.path.isdir(simulation_name):
-       os.mkdir(simulation_name)
-    
-    os.chdir(os.getcwd() + "\\" + simulation_name)
-    print(os.getcwd())
-    print()
-    print("Running: ", simulation_name)
-    run_simulation(imprints, every, charge)
-    path = Path(os.getcwd())
-    parent_path = path.parent.absolute()
-    os.chdir(parent_path)

@@ -6,18 +6,20 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 ###############################################################################
-###############   CONSTANTS DO NOT CHANGE #####################################
+###############   CONSTANTS DO NOT CHANGE UNLESS REQUIRED #####################
 ###############################################################################
-
-pi= 3.141592653589793238
-elec=1.60217653e-19
-hbar= 1.054572e-34            # J*s
-amu= 1.66053873e-27           # Kg (atomic mass unit)
-a_bohr= 0.5291772083e-10      # m
-m1=87*amu                 # Rubidium mass Kg
-m2=41*amu                 # Calcium mass Kg
-mass_ratio=m1/m2
-g=9.81
+class CONSTANTS():
+  pi = 3.141592653589793238
+  elec=1.60217653e-19
+  hbar= 1.054572e-34            # J*s
+  amu= 1.66053873e-27           # Kg (atomic mass unit)
+  a_bohr= 0.5291772083e-10      # m
+  m1=87*amu                 # Rubidium mass Kg
+  m2=41*amu                 # Calcium mass Kg
+  mass_ratio=m1/m2
+  g=9.81
+  ascat = 99*a_bohr	# scattering length
+  nat = 5e+4		# number of atoms
 
 ##############################################################################
 ##############    UTILITY FUNCTIONS    #######################################
@@ -115,7 +117,7 @@ def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3):
               x = math.sqrt(((t)**2 +(y)**2))+(t)
               phase[k,:,i] += 2 * q * torch.atan2(y, x)
             else:
-              phase[k,:,i] += q*pi
+              phase[k,:,i] += q*CONSTANTS.pi
 
     phase[phase.isnan()] = 0+0j
     return phase

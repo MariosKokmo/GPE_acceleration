@@ -8,8 +8,8 @@
     "snapshots":150,
     "repetitive":1,
     "vortex_charge":[2,2,5],
-    "vortex_position_x":[0],
-    "vortex_position_y":[0],
-    "period_of_reimprint":[20,30,40],
+    "vortex_position_x":[0,0,0],
+    "vortex_position_y":[0,0,0],
+    "imprint_every":[20,30,40],
     "max_imprints":[2,3,4]
 }
