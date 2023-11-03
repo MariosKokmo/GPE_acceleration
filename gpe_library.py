@@ -51,7 +51,7 @@ def read_ground_state(data, psi1, n1, n2, n3):
 
     return psi1
 
-def init_state(x1, x2, x3, p1, p2, p3, x_min, x_max, dx, dp, w, n1, n2, n3, uext1):
+def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     """
     Initialises the grid for x and p spaces
     and the external potential
@@ -61,6 +61,16 @@ def init_state(x1, x2, x3, p1, p2, p3, x_min, x_max, dx, dp, w, n1, n2, n3, uext
     uext1, x1, x2, x3, p1, p2, p3
 
     """
+    ##############    EMPTY MATRICES TO FIT DATA    ##############################
+    uext1 = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
+    x1 = torch.zeros((1,n1), dtype=torch.float64, device=device)
+    x2 = torch.zeros((1,n2), dtype=torch.float64, device=device)
+    x3 = torch.zeros((1,n3), dtype=torch.float64, device=device)
+    p1 = torch.zeros((1,n1), dtype=torch.float64, device=device)
+    p2 = torch.zeros((1,n2), dtype=torch.float64, device=device)
+    p3 = torch.zeros((1,n3), dtype=torch.float64, device=device)
+    p_sq = torch.zeros((n1,n2,n3), dtype=torch.float64, device=device)
+
     # Build space and momentum grids
     x1 = x_min[0] + torch.arange(n1, dtype=torch.float64)*dx[0] # size n1
     p1[0][:n1//2] = dp[0] * torch.arange(n1//2)
@@ -84,7 +94,7 @@ def init_state(x1, x2, x3, p1, p2, p3, x_min, x_max, dx, dp, w, n1, n2, n3, uext
 
     return uext1, x1, x2, x3, p1, p2, p3, p_sq
 
-def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3):
+def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):
     """
     Prints the vortices on the condensate by modifying the phase of the
     ground state.
@@ -96,6 +106,8 @@ def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3):
         1st row: x position
         2nd row: y position
         3rd row: vortex charges
+    phase: torch.Tensor
+        the current phase of the condensate to be modified
     Returns
     -------
     updated phase of the condensate.
@@ -183,8 +195,21 @@ def update_phase(psi1, phase, n1, n2, n3):
   psi1 = psi1 * torch.exp(phase*1j)
   return psi1
 
-def write_psi():
-    pass
+def write_psi(file_name, psi, n1, n2, n3):
+    """
+    Writes the wavefunction of the condensate to a file.
+    Uaually used for the ground state.
+
+    Args:
+      file_name: str, the name of the file to be created
+      psi: torch.Tensor, the wavefunction of the condensate
+      n1, n2, n3: integer, the grid points in the 3 dimensions
+    """
+    with open(file_name, 'w') as f:
+        for i in range(n1):
+            for j in range(n2):
+              for k in range(n3):
+                 f.write(f'({psi[i,j,k].real},{psi[i,j,k].imag})\n')
 
 def write_data(psi1, count, x1, x3, n1, n3, a_ho):
     file_name = f'R-{count:003}-cd.dat'

@@ -13,7 +13,11 @@ The simulations are defined in a json file called 'configuration_file.json'.
 the main package dependencies are:
 - numpy:  1.23.5
 - pandas:  1.5.3
-- torch:  2.1.0+cu118
+- torch:  1.8.1
 - matplotlib:  3.7.1
 
-The software should run for Python version >=3.8 
+The software should run for Python version >=3.7
+
+### ground state
+For the ground state calculations, pyTorch 1.8.1 has been tested.
+With later versions, when doing the conjugations of matrices, the functions might have changed.

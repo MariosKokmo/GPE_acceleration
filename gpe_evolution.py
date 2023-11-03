@@ -32,7 +32,8 @@ def run_simulation(max_imprints,\
                    repetitive,\
                    ground_state,\
                    device,\
-                   sim_params
+                   sim_params,\
+                   logfile
                   ):
   """
   Runs one simulation with specific parameters.
@@ -58,15 +59,6 @@ def run_simulation(max_imprints,\
   ##############    EMPTY MATRICES TO FIT DATA    ##############################
   ##############################################################################
   phase = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
-  uext1 = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
-  psi1 = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
-  x1 = torch.zeros((1,n1), dtype=torch.float64, device=device)
-  x2 = torch.zeros((1,n2), dtype=torch.float64, device=device)
-  x3 = torch.zeros((1,n3), dtype=torch.float64, device=device)
-  p1 = torch.zeros((1,n1), dtype=torch.float64, device=device)
-  p2 = torch.zeros((1,n2), dtype=torch.float64, device=device)
-  p3 = torch.zeros((1,n3), dtype=torch.float64, device=device)
-  p_sq = torch.zeros((n1,n2,n3), dtype=torch.float64, device=device)
 
   ##############################################################################
   ##############    SET UP THE SIMULATION    ###################################
@@ -86,15 +78,16 @@ def run_simulation(max_imprints,\
   dt = sim_params["dt"]
   u = sim_params["u"]
 
-  uext1, x1, x2, x3, p1, p2, p3, p_sq = init_state(x1, x2, x3, p1, p2, p3, x_min, x_max, dx, dp, w, n1, n2, n3, uext1)
+  uext1, x1, x2, x3, p1, p2, p3, p_sq = init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device)
   uext1 = uext1.to(device=device)
 
   # read the ground state
+  psi1 = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
   psi1 = read_ground_state(ground_state, psi1, n1, n2, n3) # shape (n1,n2,n3) complex
   psi1 = torch.tensor(psi1, device=device) # dtype complex128
 
   # calculate the phase needed to imprint the vortices on the ground state (takes a while because of the for loops)
-  phase = imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3)
+  phase = imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device=device)
   init_phase = phase.detach()
 
   # imprint the vortices. Initial imprint
@@ -108,6 +101,7 @@ def run_simulation(max_imprints,\
   count = 0
   
   if repetitive:
+    logfile.write(f"Will imprint every {imprint_again_every} snapshots for {max_imprints} times\n")
     print(f"Will imprint every {imprint_again_every} snapshots for {max_imprints} times")
 
   for iteration in range(kmax):
@@ -118,11 +112,13 @@ def run_simulation(max_imprints,\
         write_data(psi1, count, x1, x3, n1, n3, a_ho)
         count += 1
         print('t = ', t/omega_ho)
+        logfile.write(f"t = {t/omega_ho}\n")
 
     # Repetitive imprinting
     if (iteration%((kmax//shots)*imprint_again_every) == 0) and (num_imprints < max_imprints) and repetitive and (count > delay_to_first_reimprint):
       num_imprints += 1
       print("Imprinting again...")
+      logfile.write(f"Imprinting again...\n")
       # extract current phase of psi1
       cur_phase = extract_phase(psi1)
       # add the new vortices (init_phase)
