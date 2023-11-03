@@ -34,16 +34,17 @@ nat = CONSTANTS.nat
 ##############################################################################
 simulation_parameters = setup_simulations.get_simulation_parameters("configuration_file.json")
 simulation_combinations = setup_simulations.get_simulations(simulation_parameters)
-
 print("----------------------------------------")
 logfile.write("----------------------------------------\n")
+
+##############################################################################
 # grid and frequencies
 n1,n2,n3 = simulation_parameters["grid"]
 fx,fy,fz = simulation_parameters["frequencies"]
 
+##############################################################################
 # find ground state for the specific grid and potential if it doesn't exist
 gs_file = f"{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat"
-
 if not os.path.exists(gs_file):
     print("Calculating ground state...")
     logfile.write("Calculating ground state...\n")
@@ -51,6 +52,7 @@ if not os.path.exists(gs_file):
 logfile.write(f"Ground state file: {gs_file}\n")
 gs_path = os.getcwd() + "\\" + gs_file
 
+##############################################################################
 # Run the simulations
 for combination in simulation_combinations:
     simulation_name, parameters = combination
@@ -65,6 +67,7 @@ for combination in simulation_combinations:
     vortex_position_x = parameters["vortex_position_x"]
     vortex_position_y = parameters["vortex_position_y"]
 
+    # change the working folder
     os.chdir(os.getcwd() + "\\" + simulation_name)
     print()
     print("Currently in: ",os.getcwd())
@@ -85,9 +88,13 @@ for combination in simulation_combinations:
                     sim_params=simulation_parameters,\
                     logfile=logfile
                     )
+    
+    # go back to the parent directory to run the next sim
     path = Path(os.getcwd())
     parent_path = path.parent.absolute()
     os.chdir(parent_path)
 
+###############################################################################
+# Close the log file. END
 logfile.write(f"Finished all simulations at {datetime.now()}")
 logfile.close()
