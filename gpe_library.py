@@ -298,11 +298,11 @@ class HarmonicPot(Potential):
 
 class RampHarmonicPot(Potential):
    """A harmonic potential that evolves linearly in time"""
-   def __init__(self, grid, x_min, dx, w, initial, amplitude=1):
+   def __init__(self, grid, x_min, dx, w, initial=0, amplitude=1):
       n1, n2, n3 = grid
       # Build space and momentum grids
       x1 = x_min[0] + torch.arange(n1, dtype=torch.float64)*dx[0] # size n1
       x2 = x_min[1] + torch.arange(n2, dtype=torch.float64)*dx[1]
       x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
       gx, gy, gz = torch.meshgrid(x1, x2, x3)
-      self.form = lambda t: initial + (amplitude - initial) * 0.5 * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
+      self.form = lambda t: initial + (amplitude - initial) * t * 0.5 * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
