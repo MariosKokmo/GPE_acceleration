@@ -5,6 +5,7 @@ import torch
 import pandas as pd
 import matplotlib.pyplot as plt
 
+
 ###############################################################################
 ###############   CONSTANTS DO NOT CHANGE UNLESS REQUIRED #####################
 ###############################################################################
@@ -306,3 +307,4 @@ class RampHarmonicPot(Potential):
       x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
       gx, gy, gz = torch.meshgrid(x1, x2, x3)
       self.form = lambda t: initial + (amplitude - initial) * t * 0.5 * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
+

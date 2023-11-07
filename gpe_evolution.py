@@ -22,6 +22,7 @@ import torch
 import os
 from pathlib import Path
 from gpe_library import *
+from video_creation import create_video
 
 def run_simulation(max_imprints,\
                    imprint_again_every,\
@@ -113,6 +114,14 @@ def run_simulation(max_imprints,\
         count += 1
         print('t = ', t/omega_ho)
         logfile.write(f"t = {t/omega_ho}\n")
+        # create the video in the current folder
+        create_video(count,\
+                 repetitive=repetitive,\
+                 max_imprints=max_imprints,\
+                 imprint_every=imprint_again_every,\
+                 vort_x=vort_x,\
+                 vort_charge=vort_charge
+                 )
 
     # Repetitive imprinting
     if (iteration%((kmax//shots)*imprint_again_every) == 0) and (num_imprints < max_imprints) and repetitive and (count > delay_to_first_reimprint):

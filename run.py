@@ -88,7 +88,6 @@ for combination in simulation_combinations:
                     sim_params=simulation_parameters,\
                     logfile=logfile
                     )
-    
     # go back to the parent directory to run the next sim
     path = Path(os.getcwd())
     parent_path = path.parent.absolute()
