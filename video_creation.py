@@ -10,7 +10,8 @@ def create_video(count,\
                  max_imprints,\
                  imprint_every,\
                  vort_x,\
-                 vort_charge
+                 vort_charge,\
+                 n1,n3
                  ):
 
   FPS=10
@@ -19,7 +20,7 @@ def create_video(count,\
   else:
     SimulationName=f'{len(vort_x)}_{d}_{D}'
 
-  VideoDims=(512,512)
+  VideoDims=(n1,n3)
   frames=count
   video=VideoWriter(f'{SimulationName}.mp4', 0x7634706d, float(FPS), VideoDims)
 

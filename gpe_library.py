@@ -93,6 +93,8 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     g_px, g_py, g_pz = torch.meshgrid(p1[0], p2[0], p3[0])
     p_sq = g_px**2 + g_py**2 + g_pz**2
 
+    uext1 = uext1.to(device=device)
+    p_sq = p_sq.to(device=device)
     return uext1, x1, x2, x3, p1, p2, p3, p_sq
 
 def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):

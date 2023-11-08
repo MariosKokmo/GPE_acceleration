@@ -114,13 +114,15 @@ def run_simulation(max_imprints,\
         count += 1
         print('t = ', t/omega_ho)
         logfile.write(f"t = {t/omega_ho}\n")
+        if count%40==0:
         # create the video in the current folder
-        create_video(count,\
+          create_video(count,\
                  repetitive=repetitive,\
                  max_imprints=max_imprints,\
                  imprint_every=imprint_again_every,\
                  vort_x=vort_x,\
-                 vort_charge=vort_charge
+                 vort_charge=vort_charge,
+                 n1=n1,n3=n3
                  )
 
     # Repetitive imprinting

@@ -50,7 +50,7 @@ if not os.path.exists(gs_file):
     logfile.write("Calculating ground state...\n")
     _ = ground_state.find_ground_state(simulation_parameters, gs_file, device=DEVICE)
 logfile.write(f"Ground state file: {gs_file}\n")
-gs_path = os.getcwd() + "\\" + gs_file
+gs_path = os.getcwd() + "/" + gs_file
 
 ##############################################################################
 # Run the simulations
@@ -68,7 +68,7 @@ for combination in simulation_combinations:
     vortex_position_y = parameters["vortex_position_y"]
 
     # change the working folder
-    os.chdir(os.getcwd() + "\\" + simulation_name)
+    os.chdir(os.getcwd() + "/" + simulation_name)
     print()
     print("Currently in: ",os.getcwd())
     logfile.write(f"Currently in: {os.getcwd()}\n")
