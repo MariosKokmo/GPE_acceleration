@@ -5,10 +5,10 @@ JSON configuration file. Then proceeds on running these simulations in sequence.
 Note that all simulations for a specific configuration file must be on the same grid size
 and the same external potential.
 """
-import gpe_evolution
-import setup_simulations
-import ground_state
-from gpe_library import CONSTANTS
+import library.gpe_evolution as gpe_evolution
+import utils.setup_simulations as setup_simulations
+import library.ground_state as ground_state
+from library.gpe_library import CONSTANTS
 import os
 from pathlib import Path
 import torch

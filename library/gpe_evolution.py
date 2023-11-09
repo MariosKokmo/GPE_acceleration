@@ -21,8 +21,8 @@ import numpy as np
 import torch
 import os
 from pathlib import Path
-from gpe_library import *
-from video_creation import create_video
+from .gpe_library import *
+from utils.video_creation import create_video
 
 def run_simulation(max_imprints,\
                    imprint_again_every,\
@@ -142,6 +142,15 @@ def run_simulation(max_imprints,\
     psi1 = p_evolution(psi1, dtau, p_sq)
     psi1 = x_evolution(psi1, utot1, dtau)
     psi1 = normalize(psi1, d_x)
+  # create the full video
+  create_video(count,\
+                 repetitive=repetitive,\
+                 max_imprints=max_imprints,\
+                 imprint_every=imprint_again_every,\
+                 vort_x=vort_x,\
+                 vort_charge=vort_charge,
+                 n1=n1,n3=n3
+                 )
 
 ##########################################################################################
 ##########################################################################################

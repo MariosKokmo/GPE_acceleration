@@ -1,8 +1,8 @@
 """Module to find the ground state numerically using the imaginary time
 propagation method. """
 import torch
-from gpe_library import normalize, write_psi, init_grid, write_data
-from gpe_library import CONSTANTS
+from .gpe_library import normalize, write_psi, init_grid, write_data
+from .gpe_library import CONSTANTS
 
 
 def find_ground_state(sim_params, file_name, device):

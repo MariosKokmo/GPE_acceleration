@@ -3,12 +3,12 @@ import pandas as pd
 import json
 import os
 import math
-from gpe_library import CONSTANTS
+from library.gpe_library import CONSTANTS
 
 def read_configuration_file(ConfigFile):
   cwd = os.getcwd()
   print(cwd)
-  pathConfigFile = cwd + "\\" + ConfigFile
+  pathConfigFile = cwd + "/" + ConfigFile
   with open(pathConfigFile, 'r') as f:
     simulations = json.load(f)
   return simulations
@@ -72,6 +72,8 @@ def _simulations_repetitive(parameters_list):
   return simulations
 
 def _simulations_multi_vortex(parameters_list):
+  # TODO: Create the simulations for experiments with
+  # multiple vortices
   pass
 
 def get_simulation_parameters(ConfigFilePath):
@@ -157,4 +159,7 @@ def get_simulation_parameters(ConfigFilePath):
   return simulation_params
 
 def _check_simulation_parameters(simulation_params):
+  # TODO: Implement checks for the frequencies and
+  # the grid. Also for the number of simulations
+  # and whether the parameters are enough
   return True
