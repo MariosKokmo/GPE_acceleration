@@ -6,6 +6,11 @@ import math
 from library.gpe_library import CONSTANTS
 
 def read_configuration_file(ConfigFile):
+  """Reads the configuration file
+  
+  Args: str, the path to the file
+  Returns: dictionary, the contents of the configuration file
+  """
   cwd = os.getcwd()
   print(cwd)
   pathConfigFile = cwd + "/" + ConfigFile
@@ -55,14 +60,19 @@ def get_simulations(sims):
 def _simulations_repetitive(parameters_list):
   """
   Creates folders of simulations and returns their names in a list.
+
   Args: parameters_list, list of dictionaries.
+
+  Returns: List[List[str,dictionary]], List of Lists where the first
+          item of evey inner list is the name of the simulation and 
+          the second item is a dictionary of the simulation parameters
   """
   simulations = []
   for parameters in parameters_list:
     charges = parameters["vortex_charge"]
     max_imprints = parameters["max_imprints"]
     imprint_every = parameters["imprint_every"]
-    simulation_name = f'1vortex__batch{charges}__total_imprints{max_imprints}__every{imprint_every}_fps10'
+    simulation_name = f"1vortex__batch{charges}__total_imprints{max_imprints}__every{imprint_every}_fps10"
     simulations.append([simulation_name, parameters])
     print("creating folder: ", simulation_name)
     if not os.path.isdir(simulation_name):
@@ -79,16 +89,20 @@ def _simulations_multi_vortex(parameters_list):
 def get_simulation_parameters(ConfigFilePath):
   """
   Returns simulation parameters as read from the configuration file
-  after adding some more
+  after adding some more.
+
+  Args: str, the configuration file path
+
+  Returns: dict, dictionary of the simulation parameters.
   """
   pi = CONSTANTS.pi
+  # read the file
   sim_params = read_configuration_file(ConfigFilePath)
   # Grid
   n1, n2, n3 =sim_params["Grid_resolution"]
   dim = np.array([n1,n2,n3], dtype=np.float64)
   x_min = np.array(sim_params["Grid_negative_limits"])
   x_max = np.array(sim_params["Grid_positive_limits"])
-
   # frequencies
   fx, fz, fy = sim_params["Trapping_frequencies"]
   wx = 2*pi*float(fx)
@@ -96,30 +110,24 @@ def get_simulation_parameters(ConfigFilePath):
   wz = 2*pi*float(fz)
   w = np.array([wx,wz,wy])
   omega_ho = (wx*wy*wz)**(1/3)
-
   # Time steps
   t_evol = sim_params["Total_simulation_time"]
   dt = sim_params["dt"]
   shots = sim_params["snapshots"]
   dtau = omega_ho*dt
   kmax = int(t_evol//dt)
-
   # Vortex
   vortex_charge = sim_params["vortex_charge"]
   vortex_position_x = sim_params["vortex_position_x"]
   vortex_position_y = sim_params["vortex_position_y"]
-
   # Re-imprint
   imprint_every = sim_params["imprint_every"]
   max_imprints = sim_params["max_imprints"]
   repetitive = sim_params["repetitive"]
-
   # harmonic potential length scale in meters
   a_ho = math.sqrt(CONSTANTS.hbar/CONSTANTS.m1/omega_ho)  
-
   # interaction strength
   u = 4.* CONSTANTS.pi * CONSTANTS.nat * CONSTANTS.ascat/a_ho 
-
   # normalizations
   w = w/omega_ho
   x_max = x_max * 1e-6/a_ho
@@ -153,13 +161,58 @@ def get_simulation_parameters(ConfigFilePath):
       "max_imprints":max_imprints,
       "repetitive":repetitive
   }
-  ok = _check_simulation_parameters(simulation_params)
+  ok, msg = _check_simulation_parameters(simulation_params)
   if not ok:
-    raise Exception("there is an error in the configuration")
+    print(msg)
+    raise Exception("there is an error in the configuration file")
   return simulation_params
 
 def _check_simulation_parameters(simulation_params):
-  # TODO: Implement checks for the frequencies and
-  # the grid. Also for the number of simulations
-  # and whether the parameters are enough
-  return True
+  """Performs checks of the simulation parameters
+  Args: dict, the simulation parameters
+  Returns: bool, True if the checks pass, otherwise False
+  """
+  ###################################
+  ####### Perform grid checks #######
+  ###################################
+  # the minimums should be negative
+  for index, x in enumerate(simulation_params["x_min"]):
+        if x > 0:
+          msg = f"x_min for axis {index+1} is not negative. Grid is assumed symmetric."
+          return False, msg
+  # the grid should be symmetric
+  xmins = simulation_params["x_min"]
+  xmaxs = simulation_params["x_max"]
+  for index, x_min in enumerate(xmins):
+      if abs(x_min) != abs(xmaxs[index]):
+          msg = f"{index+1} max and min are not symmetric. Grid is assumed symmetric."
+          return False, msg
+  
+  ##################################
+  #### Perform frequency checks ####
+  ##################################
+  for freq in enumerate(simulation_params["frequencies"]):
+      if freq <= 0:
+          msg = f"Frequency {index+1} is negative or zero. Frequencies are assumed positives."
+          return False, msg
+  
+  ##################################
+  #### Perform vortex checks #######
+  ##################################
+  # Check the number of combinations
+  if len(simulation_params["vortex_charge"]) != len(simulation_params["vortex_position_x"]):
+      msg = f"The number of vortex charges doesn't agree with the number of x positions"
+      return False, msg
+  if len(simulation_params["vortex_position_y"]) != len(simulation_params["vortex_position_x"]):
+      msg = f"The number of x positions doesn't agree with the number of y positions"
+      return False, msg
+  for index, charges in enumerate(simulation_params["vortex_charge"]):
+      if isinstance(charges, list):
+          if len(charges) != len(simulation_params["vortex_position_x"][index]):
+              msg = f"The number of charges doesn't agree with the number of x positions at index {index}"
+              return False, msg
+          if len(charges) != len(simulation_params["vortex_position_y"][index]):
+              msg = f"The number of charges doesn't agree with the number of y positions at index {index}"
+              return False, msg
+           
+  return True, ""

@@ -1,7 +1,10 @@
 # GPE_acceleration
 GPU accelerated code for the implementation of a GPE solver.
 This package contains a simple Python implementation that accelerates the usual GPE split-step Fourier solution utilising GPUs and the PyTorch software package.
-Currently the only topological excitation supported is vortices.
+
+The software simulates the evolution of a BEC when a topological excitation is imprinted in the condensate.
+Currently the only topological excitation supported is vortices. The vortices can either be in a linear array or isolated.
+A repetitive imprinting functionality is supported.
 
 ## Run
 To run the code, you simply run the `run.py` script.
