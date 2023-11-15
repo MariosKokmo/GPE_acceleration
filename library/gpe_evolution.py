@@ -27,6 +27,7 @@ from utils.video_creation import create_video
 def run_simulation(max_imprints,\
                    imprint_again_every,\
                    charge,\
+                   imprinting_charge,\
                    vort_x,\
                    vort_y,\
                    delay_to_first_reimprint,\
@@ -38,6 +39,20 @@ def run_simulation(max_imprints,\
                   ):
   """
   Runs one simulation with specific parameters.
+
+  Args:
+    max_imprints: int, the number of additional imprints when repetitive imprinting is selected
+    imprint_again_every: int, the number of snapshots until next imprint
+    charge: array of integers, the initial charges of the vortices
+    imprint_charge: array of integers, the charges of the vortices to be imprinted
+    vort_x: array of integers, the initial x positions of the vortices
+    vort_y: array of integers, the initial y positions of the vortices
+    delay_to_first_reimprint: int, number of snapshots before starting the re-imprints
+    repetitive: bool, repetitive imprinting selected
+    ground_state: str, the file containing the ground state
+    device: str, the device, cpu or cuda (CPU or GPU)
+    sim_params: dict, dictionary of the parameters for the specific simulation
+    logfile: file descriptor, log file for extra informatiom
   """
   # imprint the batch every this number of snapshots
   imprint_again_every = imprint_again_every 
@@ -54,7 +69,9 @@ def run_simulation(max_imprints,\
   vort_x = np.array([vort_x])
   vort_y = np.array([vort_y])
   vort_charge = np.array([charge])
+  imprinting_charge = np.array([imprinting_charge])
   vortices = np.vstack((vort_x,vort_y,vort_charge))
+  imprinting_vortices = np.vstack((vort_x,vort_y,imprinting_charge))
 
   ##############################################################################
   ##############    EMPTY MATRICES TO FIT DATA    ##############################
@@ -91,8 +108,11 @@ def run_simulation(max_imprints,\
   phase = imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device=device)
   init_phase = phase.detach()
 
+  repetitive_phase = imprint_vortices(imprinting_vortices, phase, x1, x2, x3, n1, n2, n3, device=device)
+  repetitive_phase = repetitive_phase.detach()
+
   # imprint the vortices. Initial imprint
-  psi1 = update_phase(psi1, phase, n1, n2, n3)
+  psi1 = update_phase(psi1, init_phase, n1, n2, n3)
 
   ##############################################################################
   ##############    MAIN LOOP OF SIMULATION    #################################
@@ -133,7 +153,7 @@ def run_simulation(max_imprints,\
       # extract current phase of psi1
       cur_phase = extract_phase(psi1)
       # add the new vortices (init_phase)
-      new_phase = add_phase(cur_phase, init_phase)
+      new_phase = add_phase(cur_phase, repetitive_phase)
       # update the phase
       psi1 = update_phase(psi1, new_phase, n1, n2, n3)
 

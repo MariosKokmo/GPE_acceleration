@@ -31,6 +31,7 @@ def get_simulations(sims):
   imprint_every = sims["imprint_every"]
   max_imprints = sims["max_imprints"]
   charges = sims["vortex_charge"]
+  imprinting_charge = sims["imprinting_charge"]
   repetitive = sims["repetitive"]
   vortex_position_x = sims["vortex_position_x"]
   vortex_position_y = sims["vortex_position_y"]
@@ -46,7 +47,7 @@ def get_simulations(sims):
     for i in range(len(charges)):
       parameters_repetitive.append({"vortex_charge":charges[i], "vortex_position_x":vortex_position_x[i],\
                                      "vortex_position_y":vortex_position_y[i], "max_imprints":max_imprints[i],\
-                                        "imprint_every":imprint_every[i], "repetitive":repetitive})
+                                        "imprint_every":imprint_every[i], "repetitive":repetitive, "imprinting_charge":imprinting_charge[i]})
     simulations = _simulations_repetitive(parameters_repetitive)
   else:
     parameters_multi_vortex = []
@@ -70,9 +71,10 @@ def _simulations_repetitive(parameters_list):
   simulations = []
   for parameters in parameters_list:
     charges = parameters["vortex_charge"]
+    imprinting_charge = parameters["imprinting_charge"]
     max_imprints = parameters["max_imprints"]
     imprint_every = parameters["imprint_every"]
-    simulation_name = f"1vortex__batch{charges}__total_imprints{max_imprints}__every{imprint_every}_fps10"
+    simulation_name = f"1vortex__initial{charges}_repetitive{imprinting_charge}__total_imprints{max_imprints}__every{imprint_every}_fps10"
     simulations.append([simulation_name, parameters])
     print("creating folder: ", simulation_name)
     if not os.path.isdir(simulation_name):
@@ -118,6 +120,7 @@ def get_simulation_parameters(ConfigFilePath):
   kmax = int(t_evol//dt)
   # Vortex
   vortex_charge = sim_params["vortex_charge"]
+  imprinting_charge = sim_params["imprinting_charge"]
   vortex_position_x = sim_params["vortex_position_x"]
   vortex_position_y = sim_params["vortex_position_y"]
   # Re-imprint
@@ -155,6 +158,7 @@ def get_simulation_parameters(ConfigFilePath):
       "shots":shots,
       "dt":dt,
       "vortex_charge":vortex_charge,
+      "imprinting_charge":imprinting_charge,
       "vortex_position_x":vortex_position_x,
       "vortex_position_y":vortex_position_y,
       "imprint_every":imprint_every,
@@ -206,6 +210,9 @@ def _check_simulation_parameters(simulation_params):
   if len(simulation_params["vortex_position_y"]) != len(simulation_params["vortex_position_x"]):
       msg = f"The number of x positions doesn't agree with the number of y positions"
       return False, msg
+  if len(simulation_params["vortex_charge"]) != len(simulation_params["imprinting_charge"]):
+      msg = f"The number of initial vortex charges doesn't agree with the number of imprinted charges"
+      return False, msg
   for index, charges in enumerate(simulation_params["vortex_charge"]):
       if isinstance(charges, list):
           if len(charges) != len(simulation_params["vortex_position_x"][index]):
@@ -213,6 +220,9 @@ def _check_simulation_parameters(simulation_params):
               return False, msg
           if len(charges) != len(simulation_params["vortex_position_y"][index]):
               msg = f"The number of charges doesn't agree with the number of y positions at index {index}"
+              return False, msg
+          if len(charges) != len(simulation_params["imprinting_charge"][index]):
+              msg = f"The number of initial charges {len(charges)}, doesn't agree with the number of imprinted {len(simulation_params['imprinting_charge'][index])}"
               return False, msg
            
   return True, ""

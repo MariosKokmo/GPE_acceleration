@@ -8,6 +8,7 @@
     "snapshots":150,
     "repetitive":1,
     "vortex_charge":[2,2,5],
+    "imprinting_charge":[1,1,1],
     "vortex_position_x":[0,0,0],
     "vortex_position_y":[0,0,0],
     "imprint_every":[20,30,40],

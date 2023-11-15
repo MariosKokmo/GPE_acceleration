@@ -66,6 +66,7 @@ for combination in simulation_combinations:
     imprint_every = parameters["imprint_every"]
     max_imprints = parameters["max_imprints"]
     charges = parameters["vortex_charge"]
+    imprinting_charge = parameters["imprinting_charge"]
     repetitive = parameters["repetitive"]
     vortex_position_x = parameters["vortex_position_x"]
     vortex_position_y = parameters["vortex_position_y"]
@@ -82,6 +83,7 @@ for combination in simulation_combinations:
                     max_imprints=max_imprints,\
                     imprint_again_every=imprint_every,\
                     charge=charges,\
+                    imprinting_charge = imprinting_charge,\
                     vort_x=vortex_position_x,\
                     vort_y=vortex_position_y,\
                     delay_to_first_reimprint=3,\

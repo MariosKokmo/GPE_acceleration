@@ -99,8 +99,9 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
 
 def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):
     """
-    Prints the vortices on the condensate by modifying the phase of the
-    ground state.
+    Creates the vortices on the condensate by modifying the phase of the
+    ground state. Note that the vortices are not yet imprinted, a 
+    phase update needs to occur through the `update_phase` function
 
     Parameters
     ----------
