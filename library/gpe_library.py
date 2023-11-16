@@ -256,3 +256,46 @@ def add_phase(cur_phase, added_phase):
   """
   final_phase = cur_phase + added_phase
   return final_phase
+
+def repetitive_imprint(psi1, repetitive_phase, n1, n2, n3):
+  """
+  Performs a re-imprint on the wavefunction. Adds the `repetitive_phase`.
+  
+  Args:
+  --------
+    psi1: torch.tensor, the wavefunction
+    repetitive_phase:
+    n1, n2, n3: int, the grid
+  Returns:
+  --------
+    torch.tensor, the updated wavefunction
+  """
+  # extract current phase of psi1
+  cur_phase = extract_phase(psi1)
+  # add the new vortices (init_phase)
+  new_phase = add_phase(cur_phase, repetitive_phase)
+  # update the phase
+  psi1 = update_phase(psi1, new_phase, n1, n2, n3)
+  return psi1
+
+def split_step_step(psi1, utot1, dtau, p_sq, d_x):
+  """
+  Performs a step of the split-step Fourier transform.
+
+  Args:
+  -------
+    psi1: torch.tensor, the wavefunction
+    utot1: torch.tensor, the total potential
+    dtau:
+    p_sq: torch.tensor, the squared momentum grid
+    d_x:
+  Returns:
+  --------
+    torch.tensor, the updated wavefunction
+  """
+  # split-step evolution
+  psi1 = x_evolution(psi1, utot1, dtau)
+  psi1 = p_evolution(psi1, dtau, p_sq)
+  psi1 = x_evolution(psi1, utot1, dtau)
+  psi1 = normalize(psi1, d_x)
+  return psi1

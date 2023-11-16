@@ -49,9 +49,9 @@ fx,fy,fz = simulation_parameters["frequencies"]
 gs_file = f"{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat"
 if not os.path.exists(gs_file):
     print("Calculating ground state...")
-    logfile.write("Calculating ground state...\n")
+    logfile.write("[INFO] Calculating ground state...\n")
     _ = ground_state.find_ground_state(simulation_parameters, gs_file, device=DEVICE)
-logfile.write(f"Ground state file: {gs_file}\n")
+logfile.write(f"[INFO] Ground state file: {gs_file}\n")
 gs_path = os.getcwd() + "/" + gs_file
 
 ##############################################################################
@@ -60,9 +60,11 @@ gs_path = os.getcwd() + "/" + gs_file
 for combination in simulation_combinations:
     simulation_name, parameters = combination
     if not os.path.isdir(simulation_name):
-        logfile.write(f"The simulation folder {simulation_name} does not exist. Creating now...")
+        logfile.write(f"[INFO] The simulation folder {simulation_name} does not exist. Creating now...")
         print(f"The simulation folder {simulation_name} does not exist. Creating now...")
         os.mkdir(simulation_name)
+    
+    # Simulation parameters
     imprint_every = parameters["imprint_every"]
     max_imprints = parameters["max_imprints"]
     charges = parameters["vortex_charge"]
@@ -71,7 +73,7 @@ for combination in simulation_combinations:
     vortex_position_x = parameters["vortex_position_x"]
     vortex_position_y = parameters["vortex_position_y"]
 
-    # change the working folder
+    # change the working folder and run the simulation
     os.chdir(os.getcwd() + "/" + simulation_name)
     print()
     print("Currently in: ",os.getcwd())

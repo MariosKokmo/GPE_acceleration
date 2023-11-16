@@ -1,3 +1,4 @@
+"""Provides some of the most common external potentials that are experimentally used"""
 import torch
 
 ###############################################################################
@@ -6,15 +7,21 @@ import torch
 
 class Potential():
     def __init__(self):
+      """
+      form: is a function of time
+      potential: is the initial value of the potential
+      """
       self.form
       self.potential
     
     def evol(self, t):
       """
       Returns the external potential at a specific time.
-      Args
+      Args:
+      -------
        t: float, time
       Returns:
+      -------
        torch.Tensor, the potential at time t
       """
       return self.form(t) * self.potential
@@ -27,8 +34,9 @@ class ConstPot(Potential):
       self.form = lambda t: 1
 
 class RampPot(Potential):
-   """Creates a ramp potential that evolves like
-   initial + t * (final - initial) / tfinal
+   """
+   Creates a ramp potential that evolves like
+   initial + (final - initial) * (t / tfinal)
    """
    def __init__(self, initial, final, grid, tfinal, device):
       n1, n2, n3 = grid
@@ -37,6 +45,10 @@ class RampPot(Potential):
 
 class HarmonicPot(Potential):
    def __init__(self, grid, x_min, dx, w, device, amplitude=1):
+      """
+      Returns a harmonic potential of the form 
+      amplitude * 1/2 * (wx*x^2 + wy*y^2 + wz*z^2)
+      """
       n1, n2, n3 = grid
       # Build space and momentum grids
       x1 = x_min[0] + torch.arange(n1, dtype=torch.float64)*dx[0] # size n1
