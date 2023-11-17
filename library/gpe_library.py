@@ -187,14 +187,17 @@ def normalize(phi, d_x):
     return phi
 
 
-def update_phase(psi1, phase, n1, n2, n3):
+def update_phase(psi1, phase):
   """
     Updates the phase of the wavefunction.
     
-    Parameters
-    ----------
-    psi1 : torch.Tensor
-    phase : torch.Tensor
+    Args:
+    -----
+      psi1 : torch.Tensor
+      phase : torch.Tensor
+    Returns:
+    --------
+      torch.Tensor, the updated wavefunction
   """
   psi1 = psi1 * torch.exp(phase*1j)
   return psi1
@@ -278,7 +281,11 @@ def repetitive_imprint(psi1, repetitive_phase, n1, n2, n3):
   psi1 = update_phase(psi1, new_phase, n1, n2, n3)
   return psi1
 
-def split_step_step(psi1, utot1, dtau, p_sq, d_x):
+def split_step_step(psi1: torch.Tensor,\
+                    utot1: torch.Tensor,\
+                    dtau,\
+                    p_sq: torch.Tensor,\
+                    d_x) -> torch.Tensor:
   """
   Performs a step of the split-step Fourier transform.
 
