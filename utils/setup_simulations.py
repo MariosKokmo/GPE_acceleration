@@ -5,7 +5,17 @@ import os
 import math
 from library.gpe_library import CONSTANTS
 
-def read_configuration_file(ConfigFile):
+
+def set_up_simulations(ConfigFile):
+    """
+    Reads the configuration file and returns the simulations to be run.
+    """
+    simulation_parameters = _get_simulation_parameters(ConfigFile)
+    simulation_combinations = _get_simulations(simulation_parameters)
+    return simulation_combinations
+
+
+def _read_configuration_file(ConfigFile):
   """Reads the configuration file
   
   Args: str, the path to the file
@@ -18,7 +28,7 @@ def read_configuration_file(ConfigFile):
     simulations = json.load(f)
   return simulations
 
-def get_simulations(sims):
+def _get_simulations(sims):
   """
   Creates the distinct simulations to be run.
   Assigns names and parameters to the simulations.
@@ -88,7 +98,7 @@ def _simulations_multi_vortex(parameters_list):
   # multiple vortices
   pass
 
-def get_simulation_parameters(ConfigFilePath):
+def _get_simulation_parameters(ConfigFilePath):
   """
   Returns simulation parameters as read from the configuration file
   after adding some more.
@@ -99,7 +109,7 @@ def get_simulation_parameters(ConfigFilePath):
   """
   pi = CONSTANTS.pi
   # read the file
-  sim_params = read_configuration_file(ConfigFilePath)
+  sim_params = _read_configuration_file(ConfigFilePath)
   # Grid
   n1, n2, n3 =sim_params["Grid_resolution"]
   dim = np.array([n1,n2,n3], dtype=np.float64)

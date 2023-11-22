@@ -2,15 +2,17 @@
 import library.gpe_library as gpe
 import torch
 
-class BCE:
-    def __init__(self, device):
+class BEC:
+    def __init__(self, app):
         self.psi = None
-        self.device = device
+        self.device = app.device
+        self.logger = app.logger
+        self.time = app.time
 
     def initialise(self, ground_state_path, grid):
         """Initialises the ground state"""
         if self.psi:
-            print("[WARN] Trying to initialise an already initialised BEC. It will skip.")
+            self.logger.write(f"{self.time} [WARN] Trying to initialise an already initialised BEC. It will skip.")
             return
         n1, n2, n3 = grid
         self.psi = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=self.device)

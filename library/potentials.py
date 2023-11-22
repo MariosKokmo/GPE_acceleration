@@ -4,6 +4,18 @@ import torch
 ###############################################################################
 ##########################   EXTERNAL POTENTIALS ##############################
 ###############################################################################
+def select_potential(potentialType):
+   potentialType = potentialType.strip().lower()
+   if potentialType == "harmonic":
+      return HarmonicPot
+   elif potentialType == "constant":
+      return ConstPot
+   elif potentialType == "ramp":
+      return RampPot
+   elif potentialType == "rampharmonic":
+      return RampHarmonicPot
+   else:
+      return None
 
 class Potential():
     def __init__(self):
