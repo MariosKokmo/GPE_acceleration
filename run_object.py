@@ -18,11 +18,8 @@ def main():
     assert new_potential, "Potential was not given"
     uext = new_potential()
 
-    # define the BEC
-    bec = BEC(app)
-
     # set up simulations
-    simulations = Simulation()
+    simulations = Simulation(system)
 
     # run simulations 
     simulations.run_simulations()

@@ -152,10 +152,10 @@ def _get_simulation_parameters(ConfigFilePath):
 
   # sim params will be used throughout
   simulation_params = {
-      "grid":[n1, n2, n3],
+      "Grid_resolution":[n1, n2, n3],
       "x_min":x_min,
       "x_max":x_max,
-      "frequencies":sim_params["Trapping_frequencies"],
+      "Trapping_frequencies":sim_params["Trapping_frequencies"],
       "w":w,
       "dx":dx,
       "dp":dp,
