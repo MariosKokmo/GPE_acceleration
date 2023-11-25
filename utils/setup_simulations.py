@@ -5,7 +5,8 @@ import os
 import math
 from library.gpe_library import CONSTANTS
 
-def read_configuration_file(ConfigFile):
+
+def _read_configuration_file(ConfigFile):
   """Reads the configuration file
   
   Args: str, the path to the file
@@ -18,7 +19,7 @@ def read_configuration_file(ConfigFile):
     simulations = json.load(f)
   return simulations
 
-def get_simulations(sims):
+def get_simulation_combinations(sims):
   """
   Creates the distinct simulations to be run.
   Assigns names and parameters to the simulations.
@@ -99,7 +100,7 @@ def get_simulation_parameters(ConfigFilePath):
   """
   pi = CONSTANTS.pi
   # read the file
-  sim_params = read_configuration_file(ConfigFilePath)
+  sim_params = _read_configuration_file(ConfigFilePath)
   # Grid
   n1, n2, n3 =sim_params["Grid_resolution"]
   dim = np.array([n1,n2,n3], dtype=np.float64)
@@ -142,10 +143,10 @@ def get_simulation_parameters(ConfigFilePath):
 
   # sim params will be used throughout
   simulation_params = {
-      "grid":[n1, n2, n3],
+      "Grid_resolution":[n1, n2, n3],
       "x_min":x_min,
       "x_max":x_max,
-      "frequencies":sim_params["Trapping_frequencies"],
+      "Trapping_frequencies":sim_params["Trapping_frequencies"],
       "w":w,
       "dx":dx,
       "dp":dp,

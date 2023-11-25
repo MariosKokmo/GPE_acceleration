@@ -32,8 +32,8 @@ nat = CONSTANTS.nat
 ##############################################################################
 #####################   SETUP ALL SIMULATIONS   ##############################
 ##############################################################################
-simulation_parameters = setup_simulations.get_simulation_parameters("configuration_file.json")
-simulation_combinations = setup_simulations.get_simulations(simulation_parameters)
+simulation_parameters = setup_simulations._get_simulation_parameters("configuration_file.json")
+simulation_combinations = setup_simulations._get_simulations(simulation_parameters)
 print("----------------------------------------")
 logfile.write("----------------------------------------\n")
 

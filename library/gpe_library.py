@@ -59,11 +59,10 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
 
     Returns
     -------
-    uext1, x1, x2, x3, p1, p2, p3
+    x1, x2, x3, p1, p2, p3
 
     """
     ##############    EMPTY MATRICES TO FIT DATA    ##############################
-    uext1 = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
     x1 = torch.zeros((1,n1), dtype=torch.float64, device=device)
     x2 = torch.zeros((1,n2), dtype=torch.float64, device=device)
     x3 = torch.zeros((1,n3), dtype=torch.float64, device=device)
@@ -85,22 +84,18 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     p3[0][:n3//2] = dp[2] * torch.arange(n3//2)
     p3[0][n3//2:] = dp[2] * (torch.arange(n3//2, n3) - n3)
 
-    # Build the external harmonic potential
-    gx, gy, gz = torch.meshgrid(x1, x2, x3)
-    uext1 = 0.5 * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
-
     # build the p-space squared. Useful for the FFT later
     g_px, g_py, g_pz = torch.meshgrid(p1[0], p2[0], p3[0])
     p_sq = g_px**2 + g_py**2 + g_pz**2
 
-    uext1 = uext1.to(device=device)
     p_sq = p_sq.to(device=device)
-    return uext1, x1, x2, x3, p1, p2, p3, p_sq
+    return x1, x2, x3, p1, p2, p3, p_sq
 
 def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):
     """
     Creates the vortices on the condensate by modifying the phase of the
-    ground state. Note that the vortices are not yet imprinted, a 
+    ground state. The vortices are on the xz (n1,n3) plane.
+    Note that the vortices are not yet imprinted, a 
     phase update needs to occur through the `update_phase` function
 
     Parameters
@@ -146,7 +141,7 @@ def x_evolution(psi1, utot1, dtau, factor=0.5):
     psi1 : torch.Tensor
         The wavefunction of the system.
     utot1 : torch.Tensor
-        The trapping potential
+        The trapping potential in this time step
     dtau : float
         The time evolution step.
     factor : float
@@ -181,20 +176,29 @@ def p_evolution(psi1, dtau, p_sq):
 
 def normalize(phi, d_x):
     """
-        Normalizes the wavefunction.
+    Normalizes the wavefunction.
+    Args:
+    ----
+    phi: torch.Tensor
+        The wavefunction to be normalised
+    d_x: int,
+        The product of the grid dimensions
     """
     phi = phi/torch.sqrt(d_x * torch.sum(torch.abs(phi)**2))
     return phi
 
 
-def update_phase(psi1, phase, n1, n2, n3):
+def update_phase(psi1, phase):
   """
     Updates the phase of the wavefunction.
     
-    Parameters
-    ----------
-    psi1 : torch.Tensor
-    phase : torch.Tensor
+    Args:
+    -----
+      psi1 : torch.Tensor
+      phase : torch.Tensor
+    Returns:
+    --------
+      torch.Tensor, the updated wavefunction
   """
   psi1 = psi1 * torch.exp(phase*1j)
   return psi1
@@ -213,7 +217,7 @@ def write_psi(file_name, psi, n1, n2, n3):
         for i in range(n1):
             for j in range(n2):
               for k in range(n3):
-                 f.write(f'({psi[i,j,k].real},{psi[i,j,k].imag})\n')
+                 f.write(f'{psi[i,j,k].real},{psi[i,j,k].imag}\n')
 
 def write_data(psi1, count, x1, x3, n1, n3, a_ho):
     file_name = f'R-{count:003}-cd.dat'
@@ -278,7 +282,11 @@ def repetitive_imprint(psi1, repetitive_phase, n1, n2, n3):
   psi1 = update_phase(psi1, new_phase, n1, n2, n3)
   return psi1
 
-def split_step_step(psi1, utot1, dtau, p_sq, d_x):
+def split_step_step(psi1: torch.Tensor,\
+                    utot1: torch.Tensor,\
+                    dtau,\
+                    p_sq: torch.Tensor,\
+                    d_x) -> torch.Tensor:
   """
   Performs a step of the split-step Fourier transform.
 
@@ -288,7 +296,7 @@ def split_step_step(psi1, utot1, dtau, p_sq, d_x):
     utot1: torch.tensor, the total potential
     dtau:
     p_sq: torch.tensor, the squared momentum grid
-    d_x:
+    d_x: int, the product of the grid dimensions
   Returns:
   --------
     torch.tensor, the updated wavefunction
