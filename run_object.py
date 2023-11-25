@@ -1,7 +1,7 @@
 import application
 from models.BEC import BEC
 from models.system import System
-from models.simulation import Simulation
+from models.simulation import Simulations
 from library.potentials import select_potential
 
 def main():
@@ -11,15 +11,10 @@ def main():
     app.set_logger(logfile)
 
     # Set up the external system
-    system = System(grid, frequencies, app)
-
-    # define the external potential
-    new_potential = select_potential(potentialType)
-    assert new_potential, "Potential was not given"
-    uext = new_potential()
+    system = System(app)
 
     # set up simulations
-    simulations = Simulation(system)
+    simulations = Simulations(system)
 
     # run simulations 
     simulations.run_simulations()

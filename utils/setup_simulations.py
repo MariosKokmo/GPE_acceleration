@@ -6,15 +6,6 @@ import math
 from library.gpe_library import CONSTANTS
 
 
-def set_up_simulations(ConfigFile):
-    """
-    Reads the configuration file and returns the simulations to be run.
-    """
-    simulation_parameters = _get_simulation_parameters(ConfigFile)
-    simulation_combinations = _get_simulations(simulation_parameters)
-    return simulation_combinations
-
-
 def _read_configuration_file(ConfigFile):
   """Reads the configuration file
   
@@ -28,7 +19,7 @@ def _read_configuration_file(ConfigFile):
     simulations = json.load(f)
   return simulations
 
-def _get_simulations(sims):
+def get_simulation_combinations(sims):
   """
   Creates the distinct simulations to be run.
   Assigns names and parameters to the simulations.
@@ -98,7 +89,7 @@ def _simulations_multi_vortex(parameters_list):
   # multiple vortices
   pass
 
-def _get_simulation_parameters(ConfigFilePath):
+def get_simulation_parameters(ConfigFilePath):
   """
   Returns simulation parameters as read from the configuration file
   after adding some more.

@@ -1,29 +1,34 @@
 """Provides the class for the simulation"""
-from utils.setup_simulations import set_up_simulations
-import library.gpe_evolution as gpe_evolution
+import utils.setup_simulations as setup_simulations
 from models.BEC import BEC
 import os
 from pathlib import Path
 
-class Simulation:
+class Simulations:
+    """
+    Class that holds all simulations to be run.
+    For every simulation, a new BEC is created and initialised.
+    Then it is let to evolve.
+    """
     def __init__(self, system, app):
         self.simulation_combinations
         self.app = app
         self.logger = self.app.logger
         self.time = self.app.time
         self.device = self.app.device
-        self.BEC
+        self.BEC = None
         self.system = system
     
-    def setup_simulations(self, configFile):
+    def setup_simulations(self):
         """
         Creates the simulation combinations to be run.
         """
-        self.simulation_combinations = set_up_simulations(configFile)
+        self.simulation_combinations = setup_simulations.get_simulation_combinations(self.system.simulation_parameters)
 
     def run_simulations(self):
         """
-        Sets up the simulation and the BEC.
+        For every simulation, it creates the BEC.
+        Runs the simulation.
         """
         # Run the simulations
         for combination in self.simulation_combinations:
@@ -38,7 +43,7 @@ class Simulation:
             self.logger.write(f"[INFO] {self.time} -- Running: {simulation_name}, started at {self.time}\n")
             
             # define the BEC
-            self.BEC = BEC(parameters, self.app)
+            self.BEC = BEC(parameters, self.system,  self.app)
             self.BEC.evolve()
 
             # go back to the parent directory to run the next sim

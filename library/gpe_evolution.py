@@ -71,7 +71,7 @@ def run_simulation(max_imprints,\
   vort_charge = np.array([charge])
   imprinting_charge = np.array([imprinting_charge])
   vortices = np.vstack((vort_x,vort_y,vort_charge))
-  imprinting_vortices = np.vstack((vort_x,vort_y,imprinting_charge))
+  imprinting_vortices = np.vstack((vort_x,vort_y, imprinting_charge))
 
   ##############################################################################
   ##############    EMPTY MATRICES TO FIT DATA    ##############################
