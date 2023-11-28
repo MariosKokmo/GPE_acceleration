@@ -1,6 +1,7 @@
 """Provides the BCE class"""
 import library.gpe_library as gpe
 import library.ground_state as gs
+import utils.video_creation
 import numpy as np
 import os
 import torch
@@ -99,19 +100,34 @@ class BEC:
         
     def evolve(self):
         # get the parameters for easy access
-        imprint_every = self.parameters["imprint_every"]
-        max_imprints = self.parameters["max_imprints"]
-        charges = self.parameters["vortex_charge"]
-        imprinting_charge = self.parameters["imprinting_charge"]
-        repetitive = self.parameters["repetitive"]
-        vort_x = self.parameters["vortex_position_x"]
-        vort_y = self.parameters["vortex_position_y"]
-        vort_x = np.array([vort_x])
-        vort_y = np.array([vort_y])
-        vort_charge = np.array([charges])
-        imprinting_charge = np.array([imprinting_charge])
-        vortices = np.vstack((vort_x, vort_y, vort_charge))
-        imprinting_vortices = np.vstack((vort_x, vort_y, imprinting_charge))
+        kmax = self.system.simulation_parameters["kmax"]
+        dt = self.system.simulation_parameters["dt"]
+        omega_ho = self.system.simulation_parameters["omega_ho"]
+        shots = self.system.simulation_parameters["shots"]
+        dtau = self.system.simulation_parameters["dtau"]
+        d_x = self.system.simulation_parameters["d_x"]
+        a_ho = self.system.simulation_parameters["a_ho"]
+        p_sq = self.system.p_sq
+        x1, x2, x3 = self.system.space_axes
+        p1, p2, p3 = self.system.momentum_axes
+        uext = self.system.uext
+        n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
+
+        if self.parameters["vortex_excitation"]:
+            # Vortex related
+            imprint_every = self.parameters["imprint_every"]
+            max_imprints = self.parameters["max_imprints"]
+            charges = self.parameters["vortex_charge"]
+            imprinting_charge = self.parameters["imprinting_charge"]
+            repetitive = self.parameters["repetitive"]
+            vort_x = self.parameters["vortex_position_x"]
+            vort_y = self.parameters["vortex_position_y"]
+            vort_x = np.array([vort_x])
+            vort_y = np.array([vort_y])
+            vort_charge = np.array([charges])
+            imprinting_charge = np.array([imprinting_charge])
+            vortices = np.vstack((vort_x, vort_y, vort_charge))
+            imprinting_vortices = np.vstack((vort_x, vort_y, imprinting_charge))
 
         # initialise the BEC on the ground state
         self._initialise()
@@ -120,4 +136,52 @@ class BEC:
         self._imprint_vortices(self, vortices)
         
         # evolve the BEC and perform re-imprint
+        ##############################################################################
+        ##############    MAIN LOOP OF SIMULATION    #################################
+        ##############################################################################
+
+        num_imprints = 0 # there has already been 1 imprint, the initial one
+        count = 0
+        
+        if repetitive:
+            self.logger.write(f"Will imprint every {imprint_every} snapshots for {max_imprints} times\n")
+
+        for iteration in range(kmax):
+            t = dt*iteration*omega_ho
+            utot = u*torch.abs(self.psi)**2 + uext # Total potential shape (n1,n2,n3)
+
+            if (iteration%(kmax/shots) == 0):
+                gpe.write_data(self.psi, count, x1, x3, n1, n3, a_ho)
+                count += 1
+                self.logger.write(f"t = {t/omega_ho}\n")
+                if count%40==0:
+                # create the video in the current folder
+                    utils.video_creation.create_video(count,\
+                        repetitive=repetitive,\
+                        max_imprints=max_imprints,\
+                        imprint_every=imprint_every,\
+                        vort_x=vort_x,\
+                        vort_charge=vort_charge,
+                        n1=n1,n3=n3
+                        )
+
+            # Repetitive imprinting
+            if (iteration%((kmax//shots)*imprint_every) == 0) and (num_imprints < max_imprints) and repetitive:
+                num_imprints += 1
+                print("Imprinting again...")
+                self.logger.write(f"Imprinting again...\n")
+                self._repetitive_imprint(self, repetitive_phase)
+
+            # split-step evolution
+            self._step(utot, dtau, p_sq, d_x)
+        
+        # create the full video
+        utils.video_creation.create_video(count,\
+                        repetitive=repetitive,\
+                        max_imprints=max_imprints,\
+                        imprint_every=imprint_every,\
+                        vort_x=vort_x,\
+                        vort_charge=vort_charge,
+                        n1=n1,n3=n3
+                        )
         

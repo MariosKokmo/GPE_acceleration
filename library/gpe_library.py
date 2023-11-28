@@ -307,3 +307,28 @@ def split_step_step(psi1: torch.Tensor,\
   psi1 = x_evolution(psi1, utot1, dtau)
   psi1 = normalize(psi1, d_x)
   return psi1
+
+def calculate_velocity(phase, p_grid):
+  """
+  Calculates the velocity of the condensate.
+  v = hbar/m * (grad(phase))
+  For the calculation of the gradient, spectral derivative is used.
+  Note: the result needs to be multiplied by hbar/m
+  Args:
+  -----
+  phase: torch.Tensor, the phase of the condensate wavefunction
+  p_grid: torch.Tensor, the momentum space grid
+
+  Returns:
+  --------
+    torch.Tensor, the grad of the phase
+  """
+  spect = p_grid * np.fft.fftn(phase) * 1j
+  grad = np.fft.ifftn(spect).real
+  return grad
+
+def write_phase():
+   pass
+
+def read_phase():
+   pass

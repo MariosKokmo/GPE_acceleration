@@ -12,6 +12,7 @@ class System:
         self.momentum_axes
         self.p_sq
         self.simulation_parameters = None
+        self.uext = None
         # call the parameter initialisation
         self._initialise_parameters()
         
