@@ -89,7 +89,11 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     p_sq = g_px**2 + g_py**2 + g_pz**2
 
     p_sq = p_sq.to(device=device)
-    return x1, x2, x3, p1, p2, p3, p_sq
+
+    # Real space grid
+    g_x, g_y, g_z = torch.meshgrid(x1[0], x2[0], x3[0])
+    space_grid = [g_x, g_y, g_z]
+    return x1, x2, x3, p1, p2, p3, p_sq, space_grid
 
 def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):
     """
@@ -230,80 +234,140 @@ def write_data(psi1, count, x1, x3, n1, n3, a_ho):
                 f.write(f'{first},{second},{third}\n')
 
 def extract_phase(psi):
-  """
-  Extracts the phase from the wave function.
+    """
+    Extracts the phase from the wave function.
 
-  Parameters
-  ----------
-  psi : torch.tensor
-    The wavefunction of the condensate.
-  """
-  phase = torch.imag(torch.log(psi/torch.sqrt(torch.abs(psi)**2)))
-  return phase
+    Args:
+    -----
+    psi : torch.Tensor
+      The wavefunction of the condensate.
+    
+    Returns:
+    -------
+      torch.Tensor, the phase of the condensate
+    """
+    phase = torch.imag(torch.log(psi/torch.sqrt(torch.abs(psi)**2)))
+    return phase
 
 def add_phase(cur_phase, added_phase):
-  """
-  Adds an extra phase to our current phase. This is the effect of imprinting
-  additional vortices in the current condensate.
+    """
+    Adds an extra phase to our current phase. This is the effect of imprinting
+    additional vortices in the current condensate.
 
-  Parameters
-  ----------
-  cur_phase : torch.tensor
-    The current phase of the condensate wavefunction.
-  added_phase : torch.tensor
-    The additional phase due to imprinting.
+    Parameters
+    ----------
+    cur_phase : torch.tensor
+      The current phase of the condensate wavefunction.
+    added_phase : torch.tensor
+      The additional phase due to imprinting.
 
-  Returns
-  -------
-  final_phase : torch.tensor
-    The new updated phase.
-  """
-  final_phase = cur_phase + added_phase
-  return final_phase
+    Returns
+    -------
+    final_phase : torch.tensor
+      The new updated phase.
+    """
+    final_phase = cur_phase + added_phase
+    return final_phase
 
 def repetitive_imprint(psi1, repetitive_phase, n1, n2, n3):
-  """
-  Performs a re-imprint on the wavefunction. Adds the `repetitive_phase`.
-  
-  Args:
-  --------
-    psi1: torch.tensor, the wavefunction
-    repetitive_phase:
-    n1, n2, n3: int, the grid
-  Returns:
-  --------
-    torch.tensor, the updated wavefunction
-  """
-  # extract current phase of psi1
-  cur_phase = extract_phase(psi1)
-  # add the new vortices (init_phase)
-  new_phase = add_phase(cur_phase, repetitive_phase)
-  # update the phase
-  psi1 = update_phase(psi1, new_phase, n1, n2, n3)
-  return psi1
+    """
+    Performs a re-imprint on the wavefunction. Adds the `repetitive_phase`.
+    
+    Args:
+    --------
+      psi1: torch.tensor, the wavefunction
+      repetitive_phase:
+      n1, n2, n3: int, the grid
+    Returns:
+    --------
+      torch.tensor, the updated wavefunction
+    """
+    # extract current phase of psi1
+    cur_phase = extract_phase(psi1)
+    # add the new vortices (init_phase)
+    new_phase = add_phase(cur_phase, repetitive_phase)
+    # update the phase
+    psi1 = update_phase(psi1, new_phase, n1, n2, n3)
+    return psi1
 
 def split_step_step(psi1: torch.Tensor,\
-                    utot1: torch.Tensor,\
-                    dtau,\
-                    p_sq: torch.Tensor,\
-                    d_x) -> torch.Tensor:
-  """
-  Performs a step of the split-step Fourier transform.
+                      utot1: torch.Tensor,\
+                      dtau,\
+                      p_sq: torch.Tensor,\
+                      d_x) -> torch.Tensor:
+    """
+    Performs a step of the split-step Fourier transform.
 
-  Args:
-  -------
-    psi1: torch.tensor, the wavefunction
-    utot1: torch.tensor, the total potential
-    dtau:
-    p_sq: torch.tensor, the squared momentum grid
-    d_x: int, the product of the grid dimensions
-  Returns:
-  --------
-    torch.tensor, the updated wavefunction
-  """
-  # split-step evolution
-  psi1 = x_evolution(psi1, utot1, dtau)
-  psi1 = p_evolution(psi1, dtau, p_sq)
-  psi1 = x_evolution(psi1, utot1, dtau)
-  psi1 = normalize(psi1, d_x)
-  return psi1
+    Args:
+    -------
+      psi1: torch.tensor, the wavefunction
+      utot1: torch.tensor, the total potential
+      dtau:
+      p_sq: torch.tensor, the squared momentum grid
+      d_x: int, the product of the grid dimensions
+    Returns:
+    --------
+      torch.tensor, the updated wavefunction
+    """
+    # split-step evolution
+    psi1 = x_evolution(psi1, utot1, dtau)
+    psi1 = p_evolution(psi1, dtau, p_sq)
+    psi1 = x_evolution(psi1, utot1, dtau)
+    psi1 = normalize(psi1, d_x)
+    return psi1
+
+def calculate_velocity(phase, p_grid):
+    """
+    Calculates the velocity of the condensate.
+    v = hbar/m * (grad(phase))
+    For the calculation of the gradient, spectral derivative is used.
+    Note: the result needs to be multiplied by hbar/m
+    Args:
+    -----
+    phase: torch.Tensor, the phase of the condensate wavefunction
+    p_grid: Tuple[torch.Tensor], the momentum space grid with the
+      i-th component being the momentum axis along ni (i=1,2,3)
+
+    Returns:
+    --------
+      torch.Tensor, the grad of the phase
+    """
+    spect_x = p_grid[0] * np.fft.fftn(phase) * 1j
+    spect_y = p_grid[1] * np.fft.fftn(phase) * 1j
+    grad_x = np.fft.ifftn(spect_x).real
+    grad_y = np.fft.ifftn(spect_y).real
+    grad_mod = torch.sqrt(grad_x**2 + grad_y**2)
+    grad_angle = torch.atan2(grad_y, grad_x)
+    return grad_mod, grad_angle
+
+def write_phase(phase, count, x1, x2, x3, n1, n2, n3, a_ho):
+    """
+    Writes the 3D phase in a file.
+    """
+    file_name = f'P-{count:003}-cd.dat'
+    with open(file_name, 'w') as f:
+        for i in range(n1):
+          for j in range(n2):
+            for k in range(n3):
+              first = x1[i] * a_ho * 1e6 # x position
+              second = x2[j] * a_ho * 1e6 # y position
+              third = x3[k] * a_ho * 1e6 # z position
+              fourth = phase[i,j,k]
+              f.write(f'{first},{second},{third},{fourth}\n')
+
+def rms_radius(psi, x1, x2, x3, space_grid, grid_size):
+    """
+    Calculates the RMS radius of the condensate.
+    
+    RMS = {1/(n1*n2*n3) * Sum[(r-center)**2 * |psi|**2]}**0.5 
+    """
+    n1, n2, n3 = grid_size
+    center_x = x1[len(x1)//2] 
+    center_y = x2[len(x2)//2] 
+    center_z = x3[len(x3)//2]
+    dimN = n1*n2*n3
+    # build the r-space squared.
+    g_x, g_y, g_z = space_grid
+    d_sq = (g_x-center_x)**2 + (g_y-center_y)**2 + (g_z-center_z)**2
+    rms = (torch.sum(d_sq * (torch.abs(psi)**2))/(dimN))**0.5
+    return rms

@@ -41,3 +41,34 @@ def create_video(count,\
 
     video.write(img3)
   video.release()
+
+
+def create_velocity_video(count,\
+                 simulation_name,\
+                 n1,n3
+                 ):
+
+  FPS=10
+  SimulationName=simulation_name
+
+  VideoDims=(n1,n3)
+  frames=count
+  video=VideoWriter(f'{SimulationName}_velocity.mp4', 0x7634706d, float(FPS), VideoDims)
+
+  for framenum in range(frames):
+    file_path = f'P-{framenum:003}-cd.dat'
+    print(file_path)
+    file = open(file_path,'r')
+    img=np.reshape(np.loadtxt(file, delimiter=',', usecols=2),VideoDims)
+    file.close()
+
+    zeroed=img-np.min(img)*np.ones(img.shape)
+    intImg= np.uint8((255/np.max(zeroed))*zeroed)
+
+    intImgR = np.where(intImg<230 , intImg, 255 )
+    intImgG = np.where((intImg<=127) ,intImg, 255-intImg)
+    intImgB = np.where((intImg>40) , 255-intImg, 0)
+    img3=np.dstack((intImgB,intImgG,intImgR))
+
+    video.write(img3)
+  video.release()

@@ -56,30 +56,37 @@ class RampPot(Potential):
       self.form = lambda t: (initial + (final - initial) * (t / tfinal))
 
 class HarmonicPot(Potential):
-   def __init__(self, grid, x_min, dx, w, device, amplitude=1):
+   def __init__(self, app, amplitude=1, **kwargs):
       """
       Returns a harmonic potential of the form 
       amplitude * 1/2 * (wx*x^2 + wy*y^2 + wz*z^2)
       """
-      n1, n2, n3 = grid
+
+      n1, n2, n3 = kwargs["Grid_resolution"]
+      x_min = kwargs["x_min"]
+      dx = kwargs["dx"]
+      w = kwargs["w"]
       # Build space and momentum grids
       x1 = x_min[0] + torch.arange(n1, dtype=torch.float64)*dx[0] # size n1
       x2 = x_min[1] + torch.arange(n2, dtype=torch.float64)*dx[1]
       x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
       gx, gy, gz = torch.meshgrid(x1, x2, x3)
       self.pot = 0.5 * amplitude * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
-      self.potential = self.pot.to(device=device, dtype=torch.cdouble)
+      self.potential = self.pot.to(device=app.device, dtype=torch.cdouble)
       self.form = lambda t: 1
 
 class RampHarmonicPot(Potential):
    """A harmonic potential that evolves linearly in time"""
-   def __init__(self, grid, x_min, dx, w, tfinal, device, initial=0, amplitude=1):
-      n1, n2, n3 = grid
+   def __init__(self, tfinal, app, initial=0, amplitude=1, **kwargs):
+      n1, n2, n3 = kwargs["Grid_resolution"]
+      x_min = kwargs["x_min"]
+      dx = kwargs["dx"]
+      w = kwargs["w"]
       # Build space and momentum grids
       x1 = x_min[0] + torch.arange(n1, dtype=torch.float64)*dx[0] # size n1
       x2 = x_min[1] + torch.arange(n2, dtype=torch.float64)*dx[1]
       x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
       gx, gy, gz = torch.meshgrid(x1, x2, x3)
       self.pot = 0.5 * amplitude * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
-      self.potential = self.pot.to(device=device, dtype=torch.cdouble)
+      self.potential = self.pot.to(device=app.device, dtype=torch.cdouble)
       self.form = lambda t: initial + (amplitude - initial) * (t / tfinal)

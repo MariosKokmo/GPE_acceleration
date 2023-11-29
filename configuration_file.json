@@ -7,6 +7,7 @@
     "Total_simulation_time":150e-3,
     "dt":5e-7,
     "snapshots":150,
+    "vortex_excitation":1,
     "repetitive":1,
     "vortex_charge":[2,2,5],
     "imprinting_charge":[1,1,1],

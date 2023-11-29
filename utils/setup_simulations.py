@@ -147,6 +147,7 @@ def get_simulation_parameters(ConfigFilePath):
       "x_min":x_min,
       "x_max":x_max,
       "Trapping_frequencies":sim_params["Trapping_frequencies"],
+      "Potential_type":sim_params["Potential_type"],
       "w":w,
       "dx":dx,
       "dp":dp,
@@ -196,7 +197,7 @@ def _check_simulation_parameters(simulation_params):
   ##################################
   #### Perform frequency checks ####
   ##################################
-  for freq in enumerate(simulation_params["frequencies"]):
+  for index, freq in enumerate(simulation_params["Trapping_frequencies"]):
       if freq <= 0:
           msg = f"Frequency {index+1} is negative or zero. Frequencies are assumed positives."
           return False, msg
