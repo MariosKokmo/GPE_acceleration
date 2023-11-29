@@ -11,15 +11,17 @@ class Simulations:
     Then it is let to evolve.
     """
     def __init__(self, system, app):
-        self.simulation_combinations
+        self.simulation_combinations = None
         self.app = app
         self.logger = self.app.logger
         self.time = self.app.time
         self.device = self.app.device
         self.BEC = None
         self.system = system
+        # set up simulations
+        self._setup_simulations()
     
-    def setup_simulations(self):
+    def _setup_simulations(self):
         """
         Creates the simulation combinations to be run.
         """

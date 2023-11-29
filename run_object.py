@@ -18,7 +18,7 @@ def main():
     system = System(app)
 
     # set up simulations
-    simulations = Simulations(system)
+    simulations = Simulations(system, app)
 
     # run simulations 
     simulations.run_simulations()

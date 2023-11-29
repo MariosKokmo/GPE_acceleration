@@ -5,15 +5,16 @@ from library.potentials import select_potential
 
 class System:
     def __init__(self, app):
-        self.device = app.device
-        self.logger = app.logger
+        self.app = app
+        self.device = self.app.device
+        self.logger = self.app.logger
         self.time = app.time
-        self.space_axes
-        self.momentum_axes
+        self.space_axes = None
+        self.momentum_axes = None
         # squared momentum grid (3D)
-        self.p_sq
+        self.p_sq = None
         # real space grid (3D)
-        self.space_grid
+        self.space_grid = None
         self.simulation_parameters = None
         # the selected external potential
         self.uext = None
@@ -33,7 +34,7 @@ class System:
         potentialType = self.simulation_parameters["Potential_type"]
         new_potential = select_potential(potentialType)
         assert new_potential, "Potential was not given"
-        self.uext = new_potential()
+        self.uext = new_potential(app=self.app, **self.simulation_parameters)
 
         # initialise the grid
         self._initialise_grid()
