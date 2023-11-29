@@ -10,8 +10,12 @@ class System:
         self.time = app.time
         self.space_axes
         self.momentum_axes
+        # squared momentum grid (3D)
         self.p_sq
+        # real space grid (3D)
+        self.space_grid
         self.simulation_parameters = None
+        # the selected external potential
         self.uext = None
         # call the parameter initialisation
         self._initialise_parameters()
@@ -43,9 +47,10 @@ class System:
         dx = self.simulation_parameters["dx"]
         dp = self.simulation_parameters["dp"]
         w = self.simulation_parameters["w"]
-        x1, x2, x3, p1, p2, p3, p_sq = gpe.init_grid(x_min, x_max,\
+        x1, x2, x3, p1, p2, p3, p_sq, space_grid = gpe.init_grid(x_min, x_max,\
                                                         dx, dp, w,\
                                                         n1, n2, n3, self.device)
         self.space_axes = [x1, x2, x3]
         self.momentum_axes = [p1, p2, p3]
         self.p_sq = p_sq
+        self.space_grid = space_grid
