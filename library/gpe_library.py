@@ -59,7 +59,10 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
 
     Returns
     -------
-    x1, x2, x3, p1, p2, p3
+    x1, x2, x3: torch.Tensor, the respective real space axis
+    p1, p2, p3: torch.Tensor, the respective momentum axis
+    p_sq: torch.Tensor, the squared momentum grid
+    space_grid: torch.Tensor, the real space grid
 
     """
     ##############    EMPTY MATRICES TO FIT DATA    ##############################
@@ -136,6 +139,36 @@ def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):
 
     phase[phase.isnan()] = 0+0j
     return phase
+
+def create_additive_phase(vortices, x1, x2, x3, n1, n2, n3, device):
+    """
+    Creates the additive repetitive imprinting phase to be stored and used.
+    Creates the phase in 2D.
+    Returns:
+    --------
+      torch.Tensor, the repetitive imprinting phase
+    """
+    if vortices is None:
+      return
+    number_of_vortices = vortices.shape[1]
+    repetive_phase = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
+    for n in range(number_of_vortices):
+        vx = vortices[0][n]
+        vz = vortices[1][n]
+        q = vortices[2][n]
+        for i in range(n3):
+          for k in range(n1):
+            if ((i != (vz + n3//2)) or (k >= (vx + n1//2))):
+              y = x3[i]-x3[vz+n3//2]
+              t = x1[k]-x1[vx+n1//2]
+              x = math.sqrt(((t)**2 +(y)**2))+(t)
+              repetive_phase[k,:,i] += 2 * q * torch.atan2(y, x)
+            else:
+              repetive_phase[k,:,i] += q*CONSTANTS.pi
+
+    repetive_phase[repetive_phase.isnan()] = 0+0j
+    return repetive_phase
+
 
 def x_evolution(psi1, utot1, dtau, factor=0.5):
     """
@@ -316,7 +349,7 @@ def split_step_step(psi1: torch.Tensor,\
     psi1 = normalize(psi1, d_x)
     return psi1
 
-def calculate_velocity(phase, p_grid):
+def calculate_velocity2D(phase2D, p_grid):
     """
     Calculates the velocity of the condensate.
     v = hbar/m * (grad(phase))
@@ -332,8 +365,8 @@ def calculate_velocity(phase, p_grid):
     --------
       torch.Tensor, the grad of the phase
     """
-    spect_x = p_grid[0] * np.fft.fftn(phase) * 1j
-    spect_y = p_grid[1] * np.fft.fftn(phase) * 1j
+    spect_x = p_grid[0] * np.fft.fftn(phase2D) * 1j
+    spect_y = p_grid[1] * np.fft.fftn(phase2D) * 1j
     grad_x = np.fft.ifftn(spect_x).real
     grad_y = np.fft.ifftn(spect_y).real
     grad_mod = torch.sqrt(grad_x**2 + grad_y**2)
@@ -347,13 +380,13 @@ def write_phase(phase, count, x1, x2, x3, n1, n2, n3, a_ho):
     file_name = f'P-{count:003}-cd.dat'
     with open(file_name, 'w') as f:
         for i in range(n1):
-          for j in range(n2):
-            for k in range(n3):
-              first = x1[i] * a_ho * 1e6 # x position
-              second = x2[j] * a_ho * 1e6 # y position
-              third = x3[k] * a_ho * 1e6 # z position
-              fourth = phase[i,j,k]
-              f.write(f'{first},{second},{third},{fourth}\n')
+            for j in range(n2):
+              for k in range(n3):
+                first = x1[i] * a_ho * 1e6 # x position
+                second = x2[j] * a_ho * 1e6 # y position
+                third = x3[k] * a_ho * 1e6 # z position
+                fourth = phase[i,j,k]
+                f.write(f'{first},{second},{third},{fourth}\n')
 
 def rms_radius(psi, x1, x2, x3, space_grid, grid_size):
     """

@@ -29,13 +29,20 @@ class System:
             raise Exception("Device needs to be set before the system")
         if not self.logger:
             raise Exception("Logger needs to be set before the system")
-        self.simulation_parameters = setup_simulations.get_simulation_parameters("configuration_file.json")
+        self.simulation_parameters, fault = setup_simulations.get_simulation_parameters("configuration_file.json")
+        if fault:
+            self.logger.write("[FATAL]: {} -- {}".format(self.time(), fault))
+            raise Exception("there is an error in the configuration file")
         # define the external potential
         potentialType = self.simulation_parameters["Potential_type"]
         new_potential = select_potential(potentialType)
-        assert new_potential, "Potential was not given"
+        if not new_potential:
+            self.logger.write("[FATAL]: {} -- Potential was not selected".format(self.time()))
+            raise Exception("there is an error in the configuration file")
+        
         self.uext = new_potential(app=self.app, **self.simulation_parameters)
-
+        self.uext = self.uext.to(self.device)
+        
         # initialise the grid
         self._initialise_grid()
         

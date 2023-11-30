@@ -5,7 +5,7 @@ from .gpe_library import normalize, write_psi, init_grid, write_data
 from .gpe_library import CONSTANTS
 
 
-def find_ground_state(sim_params, file_name, device):
+def find_ground_state(sim_params, system, file_name, device):
     """
     Args:
         sims_params: dictionary, holds the parameters
@@ -32,7 +32,8 @@ def find_ground_state(sim_params, file_name, device):
     # This will store the ground state
     psi1 = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
 
-    uext, x1, x2, x3, p1, p2, p3, p_sq = init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device)
+    uext = system.uext
+    x1, x2, x3, p1, p2, p3, p_sq, _ = init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device)
     # initialise some parameters
     energy = 0
     energy_old = 0

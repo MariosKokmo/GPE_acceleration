@@ -56,12 +56,18 @@ class RampPot(Potential):
       self.form = lambda t: (initial + (final - initial) * (t / tfinal))
 
 class HarmonicPot(Potential):
+   """Returns a harmonic potential of the form 
+      amplitude * 1/2 * (wx*x^2 + wy*y^2 + wz*z^2)"""
    def __init__(self, app, amplitude=1, **kwargs):
       """
-      Returns a harmonic potential of the form 
-      amplitude * 1/2 * (wx*x^2 + wy*y^2 + wz*z^2)
+      Sets the time-dependence of the potential in the `form` parameter
+      and the shape of the potential in the `potential` parameter of the class.
+      
+      Args:
+      -----
+      app: application,
+      amplitude: float, the final value of the potential, default=1.0
       """
-
       n1, n2, n3 = kwargs["Grid_resolution"]
       x_min = kwargs["x_min"]
       dx = kwargs["dx"]
@@ -77,7 +83,20 @@ class HarmonicPot(Potential):
 
 class RampHarmonicPot(Potential):
    """A harmonic potential that evolves linearly in time"""
-   def __init__(self, tfinal, app, initial=0, amplitude=1, **kwargs):
+   
+   def __init__(self, tfinal, app, initial=1.0, amplitude=1.0, tinit=0.0, **kwargs):
+      """
+      Sets the time-dependence of the potential in the `form` parameter
+      and the shape of the potential in the `potential` parameter of the class.
+      The initial potential is always that used to calculate the ground state.
+      Args:
+      -----
+      tfinal: float, the time when the ramp stops
+      app: application,
+      initial: float, the initial value of the potential, default=1.0
+      amplitude: float, the final value of the potential, default=1.0
+      tinit: float, the initial time when the ramp starts, default=0
+      """
       n1, n2, n3 = kwargs["Grid_resolution"]
       x_min = kwargs["x_min"]
       dx = kwargs["dx"]
@@ -87,6 +106,6 @@ class RampHarmonicPot(Potential):
       x2 = x_min[1] + torch.arange(n2, dtype=torch.float64)*dx[1]
       x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
       gx, gy, gz = torch.meshgrid(x1, x2, x3)
-      self.pot = 0.5 * amplitude * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
+      self.pot = 0.5 * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
       self.potential = self.pot.to(device=app.device, dtype=torch.cdouble)
-      self.form = lambda t: initial + (amplitude - initial) * (t / tfinal)
+      self.form = lambda t: initial + (amplitude - initial) * ((t-tinit) / (tfinal-tinit))
