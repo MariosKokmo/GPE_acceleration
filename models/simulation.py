@@ -14,7 +14,7 @@ class Simulations:
         self.simulation_combinations = None
         self.app = app
         self.logger = self.app.logger
-        self.time = self.app.time
+        self.time = self.app.time()
         self.device = self.app.device
         self.BEC = None
         self.system = system

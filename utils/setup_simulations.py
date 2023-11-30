@@ -120,6 +120,7 @@ def get_simulation_parameters(ConfigFilePath):
   dtau = omega_ho*dt
   kmax = int(t_evol//dt)
   # Vortex
+  vortex_excitation = sim_params["vortex_excitation"]
   vortex_charge = sim_params["vortex_charge"]
   imprinting_charge = sim_params["imprinting_charge"]
   vortex_position_x = sim_params["vortex_position_x"]
@@ -159,6 +160,7 @@ def get_simulation_parameters(ConfigFilePath):
       "d_x":d_x,
       "shots":shots,
       "dt":dt,
+      "vortex_excitation":vortex_excitation,
       "vortex_charge":vortex_charge,
       "imprinting_charge":imprinting_charge,
       "vortex_position_x":vortex_position_x,
@@ -170,13 +172,14 @@ def get_simulation_parameters(ConfigFilePath):
   ok, msg = _check_simulation_parameters(simulation_params)
   if not ok:
     print(msg)
-    raise Exception("there is an error in the configuration file")
-  return simulation_params
+  return simulation_params, msg
 
 def _check_simulation_parameters(simulation_params):
   """Performs checks of the simulation parameters
   Args: dict, the simulation parameters
-  Returns: bool, True if the checks pass, otherwise False
+  Returns: 
+    ok: bool, True if the checks pass, otherwise False
+    msg: str, the fault that was detected
   """
   ###################################
   ####### Perform grid checks #######
@@ -227,4 +230,4 @@ def _check_simulation_parameters(simulation_params):
               msg = f"The number of initial charges {len(charges)}, doesn't agree with the number of imprinted {len(simulation_params['imprinting_charge'][index])}"
               return False, msg
            
-  return True, ""
+  return True, None

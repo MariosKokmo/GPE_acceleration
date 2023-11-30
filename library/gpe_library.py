@@ -59,7 +59,10 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
 
     Returns
     -------
-    x1, x2, x3, p1, p2, p3
+    x1, x2, x3: torch.Tensor, the respective real space axis
+    p1, p2, p3: torch.Tensor, the respective momentum axis
+    p_sq: torch.Tensor, the squared momentum grid
+    space_grid: torch.Tensor, the real space grid
 
     """
     ##############    EMPTY MATRICES TO FIT DATA    ##############################
@@ -136,6 +139,10 @@ def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):
 
     phase[phase.isnan()] = 0+0j
     return phase
+
+def create_additive_phase(vortices, x1, x2, x3, n1, n2, n3, device):
+    # TODO
+
 
 def x_evolution(psi1, utot1, dtau, factor=0.5):
     """

@@ -15,20 +15,22 @@ class BEC:
         self.parameters = parameters
         self.system = system
         self.gs_path = None
+        self.repetitive_phase = None
 
     def _find_ground_state(self):
         """
         Finds the ground state for the BEC in the system.
         If it exists, it just reads the file.
+        The required format is `{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat`
         """
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
         fx, fy, fz = self.system.simulation_parameters["Trapping_frequencies"]
         # find ground state for the specific grid and potential if it doesn't exist
         gs_file = f"{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat"
         if not os.path.exists(gs_file):
-            self.logger.write(f"[INFO] {self.time} -- Calculating ground state...\n")
-            _ = gs.find_ground_state(self.parameters, gs_file, device=self.device)
-        self.logger.write(f"[INFO] Ground state file: {gs_file}\n")
+            self.logger.write(f"[INFO] {self.time()} -- Calculating ground state...\n")
+            _ = gs.find_ground_state(self.parameters, self.system, gs_file, device=self.device)
+        self.logger.write(f"[INFO] {self.time()} -- Ground state file: {gs_file}\n")
         self.gs_path = os.getcwd() + "/" + gs_file
     
     def _initialise(self):
@@ -71,7 +73,7 @@ class BEC:
         --------
             torch.Tensor, the new phase to be imprinted
         """
-        assert self.system.space_axes, "the system has no axes initialised"
+        assert self.system.space_axes, self.logger.write(f"[FATAL] {self.time()}-- the system has no axes initialised")
         x1, x2, x3 = self.system.space_axes
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
         phase = self._extract_phase()
@@ -86,7 +88,15 @@ class BEC:
         new_phase = self._create_vortices(vortices)
         self.psi = gpe.update_phase(new_phase)
 
-    def _repetitive_imprint(self, repetitive_phase):
+    def _calculate_repetitive_phase(self, imprinting_vortices):
+        """
+        Creates the phase to be added at each repetitive step.
+        """
+        x1, x2, x3 = self.system.space_axes
+        n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
+        self.repetitive_phase = gpe.create_additive_phase(imprinting_vortices, x1, x2, x3, n1, n2, n3, self.device)
+
+    def _repetitive_imprint(self):
         """
         Performs the repetitive imprint.
         This could be any imprint after the initial one.
@@ -94,7 +104,7 @@ class BEC:
         # extract current phase of psi1
         cur_phase = self._extract_phase()
         # add the new vortices (init_phase)
-        new_phase = gpe.add_phase(cur_phase, repetitive_phase)
+        new_phase = gpe.add_phase(cur_phase, self.repetitive_phase)
         # update the phase of the wavefunction
         self.psi = gpe.update_phase(new_phase)
         
@@ -122,15 +132,23 @@ class BEC:
             repetitive = self.parameters["repetitive"]
             vort_x = self.parameters["vortex_position_x"]
             vort_y = self.parameters["vortex_position_y"]
+            imprint_position_x = self.parameters["imprint_position_x"]
+            imprint_position_y = self.parameters["imprint_position_y"]
             vort_x = np.array([vort_x])
             vort_y = np.array([vort_y])
+            imprint_position_x = np.array([imprint_position_x])
+            imprint_position_y = np.array([imprint_position_y])
             vort_charge = np.array([charges])
             imprinting_charge = np.array([imprinting_charge])
             vortices = np.vstack((vort_x, vort_y, vort_charge))
-            imprinting_vortices = np.vstack((vort_x, vort_y, imprinting_charge))
+            imprinting_vortices = np.vstack((imprint_position_x, imprint_position_y, imprinting_charge))
+            u = self.parameters["u"]
 
         # initialise the BEC on the ground state
         self._initialise()
+
+        # calculate the repetitive imprinting phase
+        self._calculate_repetitive_phase(imprinting_vortices)
 
         # imprint the topological excitation
         self._imprint_vortices(self, vortices)
@@ -170,7 +188,7 @@ class BEC:
                 num_imprints += 1
                 print("Imprinting again...")
                 self.logger.write(f"Imprinting again...\n")
-                self._repetitive_imprint(self, repetitive_phase)
+                self._repetitive_imprint(self)
 
             # split-step evolution
             self._step(utot, dtau, p_sq, d_x)
