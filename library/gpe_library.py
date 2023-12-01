@@ -26,7 +26,7 @@ class CONSTANTS():
 ##############    UTILITY FUNCTIONS    #######################################
 ##############################################################################
 
-def read_ground_state(data, psi1, n1, n2, n3):
+def read_ground_state(data, n1, n2, n3):
     """
     Loads the ground state from a text file into a torch.tensor.
 
@@ -49,6 +49,7 @@ def read_ground_state(data, psi1, n1, n2, n3):
     psi1 = matrix.iloc[:,0] + matrix.iloc[:,1]*1j
     psi1 = psi1.values
     psi1 = psi1.reshape((n1,n2,n3))
+    psi1 = torch.from_numpy(psi1)
 
     return psi1
 
@@ -254,7 +255,7 @@ def write_psi(file_name, psi, n1, n2, n3):
         for i in range(n1):
             for j in range(n2):
               for k in range(n3):
-                 f.write(f'{psi[i,j,k].real},{psi[i,j,k].imag}\n')
+                 f.write(f'({psi[i,j,k].real},{psi[i,j,k].imag})\n')
 
 def write_data(psi1, count, x1, x3, n1, n3, a_ho):
     file_name = f'R-{count:003}-cd.dat'
@@ -367,8 +368,8 @@ def calculate_velocity2D(phase2D, p_grid):
     """
     spect_x = p_grid[0] * torch.fft.fftn(phase2D) * 1j
     spect_y = p_grid[1] * torch.fft.fftn(phase2D) * 1j
-    grad_x = np.fft.ifftn(spect_x).real
-    grad_y = np.fft.ifftn(spect_y).real
+    grad_x = torch.fft.ifftn(spect_x).real
+    grad_y = torch.fft.ifftn(spect_y).real
     grad_mod = torch.sqrt(grad_x**2 + grad_y**2)
     grad_angle = torch.atan2(grad_y, grad_x)
     return grad_mod, grad_angle
@@ -381,12 +382,12 @@ def write_phase(phase, count, x1, x2, x3, n1, n2, n3, a_ho):
     with open(file_name, 'w') as f:
         for i in range(n1):
             for j in range(n2):
-              for k in range(n3):
-                first = x1[i] * a_ho * 1e6 # x position
-                second = x2[j] * a_ho * 1e6 # y position
-                third = x3[k] * a_ho * 1e6 # z position
-                fourth = phase[i,j,k]
-                f.write(f'{first},{second},{third},{fourth}\n')
+                for k in range(n3):
+                    first = x1[i] * a_ho * 1e6 # x position
+                    second = x2[j] * a_ho * 1e6 # y position
+                    third = x3[k] * a_ho * 1e6 # z position
+                    fourth = phase[i,j,k]
+                    f.write(f'{first},{second},{third},{fourth}\n')
 
 def rms_radius(psi, x1, x2, x3, space_grid, grid_size):
     """
