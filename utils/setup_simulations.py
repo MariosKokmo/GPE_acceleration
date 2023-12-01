@@ -85,9 +85,35 @@ def _simulations_repetitive(parameters_list):
   return simulations
 
 def _simulations_multi_vortex(parameters_list):
-  # TODO: Create the simulations for experiments with
-  # multiple vortices
-  pass
+    """
+    Creates folders of simulations and returns their names in a list.
+
+    Args:
+    -----
+    parameters_list: list of dictionaries. Each dictionary contains the
+      necessary parameters for one of the simulations.
+
+    Returns: 
+    --------
+    List[List[str,dictionary]], List of Lists where the first
+            item of evey inner list is the name of the simulation and 
+            the second item is a dictionary of the simulation parameters
+    """
+    simulations = []
+    for parameters in parameters_list:
+      charges = parameters["vortex_charge"]
+      vortex_position_x = parameters["vortex_position_x"]
+      vortex_position_x_str = "-".join(vortex_position_x)
+      vortex_position_y = parameters["vortex_position_y"]
+      vortex_position_y_str = "-".join(vortex_position_y)
+      simulation_name = f"{len(charges)}vortex_x-{vortex_position_x_str}_y-{vortex_position_y_str}"
+      simulations.append([simulation_name, parameters])
+      print("creating folder: ", simulation_name)
+      if not os.path.isdir(simulation_name):
+        os.mkdir(simulation_name)
+      else:
+        print(f"{simulation_name} folder already exists...skipping")
+    return simulations
 
 def get_simulation_parameters(ConfigFilePath):
   """
