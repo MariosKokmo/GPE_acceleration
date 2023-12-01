@@ -16,23 +16,23 @@ def find_ground_state(sim_params, system, file_name, device):
     Returns:
         torch.Tensor, the ground state for the system
     """
-    n1, n2, n3 = sim_params["grid"]
+    n1, n2, n3 = system.simulation_parameters["Grid_resolution"]
     device = device
-    d_x = sim_params["d_x"]
-    dx = sim_params["dx"]
-    dp = sim_params["dp"]
-    w = sim_params["w"]
-    x_min = sim_params["x_min"]
-    x_max = sim_params["x_max"]
+    d_x = system.simulation_parameters["d_x"]
+    dx = system.simulation_parameters["dx"]
+    dp = system.simulation_parameters["dp"]
+    w = system.simulation_parameters["w"]
+    x_min = system.simulation_parameters["x_min"]
+    x_max = system.simulation_parameters["x_max"]
     dtau = 0.05*min(dx)**2
-    a_ho = sim_params["a_ho"]
+    a_ho = system.simulation_parameters["a_ho"]
 
     # This will store the external potential
     uext = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
     # This will store the ground state
     psi1 = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
 
-    uext = system.uext
+    uext = system.uext.potential
     x1, x2, x3, p1, p2, p3, p_sq, _ = init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device)
     # initialise some parameters
     energy = 0

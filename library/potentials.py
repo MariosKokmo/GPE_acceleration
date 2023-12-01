@@ -4,16 +4,16 @@ import torch
 ###############################################################################
 ##########################   EXTERNAL POTENTIALS ##############################
 ###############################################################################
-def select_potential(potentialType):
+def select_potential(potentialType, app, **simulation_parameters):
    potentialType = potentialType.strip().lower()
    if potentialType == "harmonic":
-      return HarmonicPot
+      return HarmonicPot(app, **simulation_parameters)
    elif potentialType == "constant":
-      return ConstPot
+      return ConstPot(app, **simulation_parameters)
    elif potentialType == "ramp":
-      return RampPot
+      return RampPot(app, **simulation_parameters)
    elif potentialType == "rampharmonic":
-      return RampHarmonicPot
+      return RampHarmonicPot(app, **simulation_parameters)
    else:
       return None
 
@@ -42,7 +42,7 @@ class ConstPot(Potential):
    """Constant potential across the grid"""
    def __init__(self, amplitude, grid, device):
       n1, n2, n3 = grid
-      self.potential = amplitude * torch.ones(n1,n2,n3, dtype=torch.cdouble, device=device)
+      self.potential = amplitude * torch.ones(n1,n2,n3, dtype=torch.double, device=device)
       self.form = lambda t: 1
 
 class RampPot(Potential):
@@ -52,7 +52,7 @@ class RampPot(Potential):
    """
    def __init__(self, initial, final, grid, tfinal, device):
       n1, n2, n3 = grid
-      self.potential = torch.ones(n1,n2,n3, dtype=torch.cdouble, device=device)
+      self.potential = torch.ones(n1,n2,n3, dtype=torch.double, device=device)
       self.form = lambda t: (initial + (final - initial) * (t / tfinal))
 
 class HarmonicPot(Potential):
@@ -78,7 +78,7 @@ class HarmonicPot(Potential):
       x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
       gx, gy, gz = torch.meshgrid(x1, x2, x3)
       self.pot = 0.5 * amplitude * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
-      self.potential = self.pot.to(device=app.device, dtype=torch.cdouble)
+      self.potential = self.pot.to(device=app.device, dtype=torch.double)
       self.form = lambda t: 1
 
 class RampHarmonicPot(Potential):
@@ -107,5 +107,5 @@ class RampHarmonicPot(Potential):
       x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
       gx, gy, gz = torch.meshgrid(x1, x2, x3)
       self.pot = 0.5 * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
-      self.potential = self.pot.to(device=app.device, dtype=torch.cdouble)
+      self.potential = self.pot.to(device=app.device, dtype=torch.double)
       self.form = lambda t: initial + (amplitude - initial) * ((t-tinit) / (tfinal-tinit))
