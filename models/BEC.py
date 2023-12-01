@@ -38,7 +38,7 @@ class BEC:
         Reads the ground state file and initialises the wavefunction to ground state. 
         """
         if self.psi:
-            self.logger.write(f"{self.time} [WARN] Trying to initialise an already initialised BEC. It will skip.")
+            self.logger.write(f"[WARN] {self.time()} -- Trying to initialise an already initialised BEC. It will skip.")
             return
         self._find_ground_state()
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]

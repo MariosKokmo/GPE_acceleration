@@ -143,7 +143,7 @@ def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):
 def create_additive_phase(vortices, x1, x2, x3, n1, n2, n3, device):
     """
     Creates the additive repetitive imprinting phase to be stored and used.
-    Creates the phase in 2D.
+    Creates the phase in 2D on the x1-x3 plane.
     Returns:
     --------
       torch.Tensor, the repetitive imprinting phase
@@ -357,7 +357,7 @@ def calculate_velocity2D(phase2D, p_grid):
     Note: the result needs to be multiplied by hbar/m
     Args:
     -----
-    phase: torch.Tensor, the phase of the condensate wavefunction
+    phase2D: torch.Tensor, the phase of the condensate wavefunction
     p_grid: Tuple[torch.Tensor], the momentum space grid with the
       i-th component being the momentum axis along ni (i=1,2,3)
 
@@ -365,8 +365,8 @@ def calculate_velocity2D(phase2D, p_grid):
     --------
       torch.Tensor, the grad of the phase
     """
-    spect_x = p_grid[0] * np.fft.fftn(phase2D) * 1j
-    spect_y = p_grid[1] * np.fft.fftn(phase2D) * 1j
+    spect_x = p_grid[0] * torch.fft.fftn(phase2D) * 1j
+    spect_y = p_grid[1] * torch.fft.fftn(phase2D) * 1j
     grad_x = np.fft.ifftn(spect_x).real
     grad_y = np.fft.ifftn(spect_y).real
     grad_mod = torch.sqrt(grad_x**2 + grad_y**2)
