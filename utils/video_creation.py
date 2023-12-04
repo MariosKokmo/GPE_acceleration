@@ -49,14 +49,14 @@ def create_velocity_video(count,\
                  ):
 
   FPS=10
-  SimulationName=simulation_name
+  SimulationName = simulation_name + f'_fps{FPS}_frame{count}'
 
   VideoDims=(n1,n3)
   frames=count
   video=VideoWriter(f'{SimulationName}_velocity.mp4', 0x7634706d, float(FPS), VideoDims)
 
   for framenum in range(frames):
-    file_path = f'P-{framenum:003}-cd.dat'
+    file_path = f'V-{framenum:003}-cd.dat'
     print(file_path)
     file = open(file_path,'r')
     img=np.reshape(np.loadtxt(file, delimiter=',', usecols=2),VideoDims)

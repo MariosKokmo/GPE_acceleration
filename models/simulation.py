@@ -36,13 +36,13 @@ class Simulations:
         for combination in self.simulation_combinations:
             simulation_name, parameters = combination
             if not os.path.isdir(simulation_name):
-                self.logger.write(f"[INFO] {self.time} -- The simulation folder {simulation_name} does not exist. Creating now...")
+                self.logger.write(f"[INFO]: {self.time} -- The simulation folder {simulation_name} does not exist. Creating now...")
                 os.mkdir(simulation_name)
 
             # change the working folder and run the simulation
             os.chdir(os.getcwd() + "/" + simulation_name)
-            self.logger.write(f"[INFO] {self.time} -- Currently in: {os.getcwd()}\n\n")
-            self.logger.write(f"[INFO] {self.time} -- Running: {simulation_name}, started at {self.time}\n")
+            self.logger.write(f"[INFO]: {self.time} -- Currently in: {os.getcwd()}\n\n")
+            self.logger.write(f"[INFO]: {self.time} -- Running: {simulation_name}, started at {self.time}\n")
             
             # define the BEC
             self.BEC = BEC(parameters, self.system,  self.app)

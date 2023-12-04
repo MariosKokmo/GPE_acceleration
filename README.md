@@ -16,7 +16,7 @@ The simulations are defined in a json file called 'configuration_file.json'.
 First the ground state for the specific grid is calculated (if it doesn't already exist). Then every simulation is run one after another and the results are stored in their respective folders.
 
 The flow of the logic is as follows:
-<img src="static/flow.png">
+<img src="static/flow.jpg">
 
 ## Dependencies
 the main package dependencies are:

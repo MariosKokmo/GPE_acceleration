@@ -5,6 +5,8 @@ import utils.video_creation
 import numpy as np
 import os
 import torch
+from pathlib import Path
+from sys import platform
 
 class BEC:
     def __init__(self, parameters, system, app):
@@ -26,19 +28,26 @@ class BEC:
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
         fx, fy, fz = self.system.simulation_parameters["Trapping_frequencies"]
         # find ground state for the specific grid and potential if it doesn't exist
+        cur_path = Path(os.getcwd())
+        parent_path = str(cur_path.parent.absolute())
+        os.chdir(parent_path)
         gs_file = f"{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat"
         if not os.path.exists(gs_file):
-            self.logger.write(f"[INFO] {self.time()} -- Calculating ground state...\n")
+            self.logger.write(f"[INFO]: {self.time()} -- Calculating ground state...\n")
             _ = gs.find_ground_state(self.parameters, self.system, gs_file, device=self.device)
-        self.logger.write(f"[INFO] {self.time()} -- Ground state file: {gs_file}\n")
-        self.gs_path = os.getcwd() + "/" + gs_file
+        self.logger.write(f"[INFO]: {self.time()} -- Ground state file: {gs_file}\n")
+        if platform == "win32":
+            self.gs_path = os.getcwd() + "\\" + gs_file
+        else:
+            self.gs_path = os.getcwd() + "/" + gs_file
+        os.chdir(cur_path)
     
     def _initialise(self):
         """
         Reads the ground state file and initialises the wavefunction to ground state. 
         """
         if self.psi:
-            self.logger.write(f"[WARN] {self.time()} -- Trying to initialise an already initialised BEC. It will skip.")
+            self.logger.write(f"[WARN]: {self.time()} -- Trying to initialise an already initialised BEC. It will skip.")
             return
         self._find_ground_state()
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
@@ -74,7 +83,7 @@ class BEC:
         --------
             torch.Tensor, the new phase to be imprinted
         """
-        assert self.system.space_axes, self.logger.write(f"[FATAL] {self.time()}-- the system has no axes initialised")
+        assert self.system.space_axes, self.logger.write(f"[FATAL]: {self.time()}-- the system has no axes initialised")
         x1, x2, x3 = self.system.space_axes
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
         phase = self._extract_phase()
@@ -119,6 +128,7 @@ class BEC:
         d_x = self.system.simulation_parameters["d_x"]
         a_ho = self.system.simulation_parameters["a_ho"]
         p_sq = self.system.p_sq
+        p_grid = self.system.p_grid
         x1, x2, x3 = self.system.space_axes
         p1, p2, p3 = self.system.momentum_axes
         uext = self.system.uext.potential
@@ -164,7 +174,10 @@ class BEC:
         count = 0
         wait = 5
         if repetitive:
-            self.logger.write(f"Will imprint every {imprint_every} snapshots for {max_imprints} times\n")
+            self.logger.write(f"[INFO]: {self.time()} -- Will imprint every {imprint_every} snapshots for {max_imprints} times\n")
+            SimulationName=f'{len(vort_x)}vortex__batch{vort_charge[0]}__total_imprints{max_imprints}__every{imprint_every}'
+        else:
+            SimulationName=f'{len(vort_x)}_{d}_{D}'
 
         for iteration in range(kmax):
             t = dt*iteration*omega_ho
@@ -172,6 +185,8 @@ class BEC:
 
             if (iteration%(kmax/shots) == 0):
                 gpe.write_data(self.psi, count, x1, x3, n1, n3, a_ho)
+                cur_phase = self._extract_phase()
+                gpe.write_velocity2D(cur_phase, count, x1, x3, n1, n2, n3, a_ho, p_grid)
                 count += 1
                 self.logger.write(f"t = {t/omega_ho}\n")
                 if count%40==0:
@@ -184,12 +199,15 @@ class BEC:
                         vort_charge=vort_charge,
                         n1=n1,n3=n3
                         )
+                    utils.video_creation.create_velocity_video(count,\
+                                                               SimulationName,\
+                                                               n1,n3)
 
             # Repetitive imprinting
             if (iteration%((kmax//shots)*imprint_every) == 0) and (num_imprints < max_imprints) and (count>wait) and repetitive:
                 num_imprints += 1
                 print("Imprinting again...")
-                self.logger.write(f"Imprinting again...\n")
+                self.logger.write(f"[INFO]: {self.time()} -- Imprinting again...\n")
                 self._repetitive_imprint()
 
             # split-step evolution
@@ -204,4 +222,7 @@ class BEC:
                         vort_charge=vort_charge,
                         n1=n1,n3=n3
                         )
+        utils.video_creation.create_velocity_video(count,\
+                                                    SimulationName,\
+                                                    n1,n3)
         
