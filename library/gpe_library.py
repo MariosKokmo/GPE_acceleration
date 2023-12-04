@@ -91,13 +91,15 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     # build the p-space squared. Useful for the FFT later
     g_px, g_py, g_pz = torch.meshgrid(p1[0], p2[0], p3[0])
     p_sq = g_px**2 + g_py**2 + g_pz**2
-
     p_sq = p_sq.to(device=device)
+
+    # momentum grid
+    p_grid = (g_px.to(device=device), g_py.to(device=device), g_pz.to(device=device))
 
     # Real space grid
     g_x, g_y, g_z = torch.meshgrid(x1[0], x2[0], x3[0])
     space_grid = [g_x, g_y, g_z]
-    return x1, x2, x3, p1, p2, p3, p_sq, space_grid
+    return x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid
 
 def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):
     """
@@ -405,3 +407,63 @@ def rms_radius(psi, x1, x2, x3, space_grid, grid_size):
     d_sq = (g_x-center_x)**2 + (g_y-center_y)**2 + (g_z-center_z)**2
     rms = (torch.sum(d_sq * (torch.abs(psi)**2))/(dimN))**0.5
     return rms
+
+def write_phase2D(phase, count, x1, x3, n1, n2, n3, a_ho):
+    """
+    Writes the 2D phase in a file.
+    It assumes the plane is the n1-n3
+    and the central cross-section i.e. n2 is at its midpoint
+    """
+    j = n2//2
+    file_name = f'P-{count:003}-cd.dat'
+    with open(file_name, 'w') as f:
+        for i in range(n1):
+            for k in range(n3):
+                first = x1[i] * a_ho * 1e6 # x position
+                third = x3[k] * a_ho * 1e6 # z position
+                fourth = phase[i,j,k]
+                f.write(f'{first},{third},{fourth}\n')
+
+def read_phase_file_2D(filename, n1, n3):
+    """
+    Reads a file that stores the phase of a 2D cross-section.
+    It returns the phase as a tensor reshaped as n1 x n3.
+    """
+    phase = pd.read_csv(filename, header=None, names=['x1', 'x2', 'phase'])
+    phase = phase.astype(np.float64)
+    phase = phase.values
+    phase = phase.reshape((n1, n3))
+    phase = torch.from_numpy(phase)
+    return phase
+
+def write_velocity2D(phase, count, x1, x3, n1, n2, n3, a_ho, p_grid):
+    """
+    Writes the 2D velocity in a file.
+    It assumes the plane is the n1-n3.
+    The format of the file is `x1, x3, velocity magnitude, velocity phase`
+
+    Args:
+    -----
+    phase: torch.Tensor, the 2D phase. Phase of a section
+    count: int, the snapshot number
+    x1, x3: torch.Tensor, the axes
+    n1, n3: int, the grid resolution along x1 and x3
+    a_ho: float, the harmonic oscillator length
+    p_grid: Tuple[torch.Tensor], a tuple of tensors that stores
+      the meshgrid of the momentum.
+
+    Returns:
+    --------
+    None 
+    """
+    j = n2//2
+    vel_file_name = f'V-{count:003}-cd.dat'
+    velocity_mag, veloc_phase = calculate_velocity2D(phase, p_grid)
+    with open(vel_file_name, 'w') as f:
+        for i in range(n1):
+            for k in range(n3):
+                first = x1[i] * a_ho * 1e6 # x position
+                second = x3[k] * a_ho * 1e6 # z position
+                third = velocity_mag[i,j,k]
+                fourth = veloc_phase[i,j,k]
+                f.write(f'{first},{second},{third},{fourth}\n')

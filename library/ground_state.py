@@ -33,7 +33,7 @@ def find_ground_state(sim_params, system, file_name, device):
     psi1 = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
 
     uext = system.uext.potential
-    x1, x2, x3, p1, p2, p3, p_sq, _ = init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device)
+    x1, x2, x3, p1, p2, p3, p_sq, _, _ = init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device)
     # initialise some parameters
     energy = 0
     energy_old = 0

@@ -13,6 +13,8 @@ class System:
         self.momentum_axes = None
         # squared momentum grid (3D)
         self.p_sq = None
+        # momentum grid
+        self.p_grid = None
         # real space grid (3D)
         self.space_grid = None
         self.simulation_parameters = None
@@ -56,10 +58,11 @@ class System:
         dx = self.simulation_parameters["dx"]
         dp = self.simulation_parameters["dp"]
         w = self.simulation_parameters["w"]
-        x1, x2, x3, p1, p2, p3, p_sq, space_grid = gpe.init_grid(x_min, x_max,\
+        x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid = gpe.init_grid(x_min, x_max,\
                                                         dx, dp, w,\
                                                         n1, n2, n3, self.device)
         self.space_axes = [x1, x2, x3]
         self.momentum_axes = [p1, p2, p3]
         self.p_sq = p_sq
+        self.p_grid = p_grid
         self.space_grid = space_grid

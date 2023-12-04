@@ -43,7 +43,7 @@ def get_simulation_combinations(sims):
   if repetitive:
     max_imprints = sims['max_imprints']
     assert len(max_imprints) >= 1, "max_imprints is not correct in configuration file"
-    assert len(charges) == len(imprint_every)
+    assert len(charges) == len(imprint_every), "charges and imprint_every have different number of values"
     if len(max_imprints) == 1:
       max_imprints = [max_imprints[0]]*len(imprint_every)
     
