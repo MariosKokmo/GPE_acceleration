@@ -53,7 +53,7 @@ class BEC:
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
         self.psi = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=self.device)
         self.psi = gpe.read_ground_state(self.gs_path, n1, n2, n3)
-        self.psi.to(self.device)
+        self.psi = self.psi.to(self.device)
     
     def _step(self, utot, dtau, p_sq, d_x):
         """

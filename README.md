@@ -6,8 +6,10 @@ The software simulates the evolution of a BEC when a topological excitation is i
 Currently the only topological excitation supported is vortices. The vortices can either be in a linear array or isolated.
 A repetitive imprinting functionality is supported.
 
+The vortices are assumed to be printed on the n1-n3 (i.e. x-z plane). For the simulations to have physical meaning, it is assumed that the BEC is adequately flat on the n2 (y axis) so that the vortices are assumed to not bend and traverse the whole BEC along the y axis.
+
 ## Run
-To run the code, you simply run the `run.py` script.
+To run the code, you simply run the `run.py` script. This script invokes any necessary function and set-up of the simulation.
 
 The simulations are defined in a json file called 'configuration_file.json'.
 
