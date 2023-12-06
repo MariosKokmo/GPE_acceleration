@@ -47,8 +47,7 @@ class BEC:
         Reads the ground state file and initialises the wavefunction to ground state. 
         """
         if self.psi:
-            self.logger.write(f"[WARN]: {self.time()} -- Trying to initialise an already initialised BEC. It will skip.")
-            return
+            self.logger.write(f"[WARN]: {self.time()} -- Trying to initialise an already initialised BEC. It will overwrite.")
         self._find_ground_state()
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
         self.psi = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=self.device)
@@ -175,7 +174,7 @@ class BEC:
         wait = 5
         if repetitive:
             self.logger.write(f"[INFO]: {self.time()} -- Will imprint every {imprint_every} snapshots for {max_imprints} times\n")
-            SimulationName=f'{len(vort_x)}vortex__batch{vort_charge[0]}__total_imprints{max_imprints}__every{imprint_every}'
+            SimulationName=f'{len(vort_x)}vortex__initCharge{vort_charge[0]}__imprintCharge{imprinting_charge[0]}_total_imprints{max_imprints}__every{imprint_every}'
         else:
             SimulationName=f'{len(vort_x)}_{d}_{D}'
 

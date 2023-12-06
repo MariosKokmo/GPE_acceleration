@@ -44,8 +44,7 @@ def get_simulation_combinations(sims):
     max_imprints = sims['max_imprints']
     assert len(max_imprints) >= 1, "max_imprints is not correct in configuration file"
     assert len(charges) == len(imprint_every), "charges and imprint_every have different number of values"
-    if len(max_imprints) == 1:
-      max_imprints = [max_imprints[0]]*len(imprint_every)
+    assert len(charges) == len(max_imprints), "charges and max_imprints have different number of values"
     
     parameters_repetitive = []
     for i in range(len(charges)):
@@ -264,5 +263,12 @@ def _check_simulation_parameters(simulation_params):
           if len(charges) != len(simulation_params["imprinting_charge"][index]):
               msg = f"The number of initial charges {len(charges)}, doesn't agree with the number of imprinted {len(simulation_params['imprinting_charge'][index])}"
               return False, msg
-           
+  for index, charges in enumerate(simulation_params["imprinting_charge"]):
+      if isinstance(charges, list):
+          if len(charges) != len(simulation_params["imprint_position_x"][index]):
+              msg = f"The number of imprinting charges doesn't agree with the number of x positions at index {index}"
+              return False, msg
+          if len(charges) != len(simulation_params["imprint_position_y"][index]):
+              msg = f"The number of imprinting charges doesn't agree with the number of y positions at index {index}"
+              return False, msg
   return True, None
