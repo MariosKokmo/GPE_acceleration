@@ -89,7 +89,7 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     p3[0][n3//2:] = dp[2] * (torch.arange(n3//2, n3) - n3)
 
     # build the p-space squared. Useful for the FFT later
-    g_px, g_py, g_pz = torch.meshgrid(p1[0], p2[0], p3[0])
+    g_px, g_py, g_pz = torch.meshgrid(p1[0], p2[0], p3[0], indexing='ij')
     p_sq = g_px**2 + g_py**2 + g_pz**2
     p_sq = p_sq.to(device=device)
 
@@ -97,7 +97,7 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     p_grid = (g_px.to(device=device), g_py.to(device=device), g_pz.to(device=device))
 
     # Real space grid
-    g_x, g_y, g_z = torch.meshgrid(x1[0], x2[0], x3[0])
+    g_x, g_y, g_z = torch.meshgrid(x1[0], x2[0], x3[0], indexing='ij')
     space_grid = [g_x, g_y, g_z]
     return x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid
 
@@ -135,7 +135,7 @@ def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):
             if ((i != (vz + n3//2)) or (k >= (vx + n1//2))):
               y = x3[i]-x3[vz+n3//2]
               t = x1[k]-x1[vx+n1//2]
-              x = math.sqrt(((t)**2 +(y)**2))+(t)
+              x = torch.sqrt(t**2 + y**2) + t
               phase[k,:,i] += 2 * q * torch.atan2(y, x)
             else:
               phase[k,:,i] += q*CONSTANTS.pi
@@ -164,7 +164,7 @@ def create_additive_phase(vortices, x1, x2, x3, n1, n2, n3, device):
             if ((i != (vz + n3//2)) or (k >= (vx + n1//2))):
               y = x3[i]-x3[vz+n3//2]
               t = x1[k]-x1[vx+n1//2]
-              x = math.sqrt(((t)**2 +(y)**2))+(t)
+              x = torch.sqrt(t**2 + y**2) + t
               repetive_phase[k,:,i] += 2 * q * torch.atan2(y, x)
             else:
               repetive_phase[k,:,i] += q*CONSTANTS.pi
@@ -222,7 +222,7 @@ def normalize(phi, d_x):
     phi: torch.Tensor
         The wavefunction to be normalised
     d_x: int,
-        The product of the grid dimensions
+        The grid cell volume
     """
     phi = phi/torch.sqrt(d_x * torch.sum(torch.abs(phi)**2))
     return phi
@@ -357,6 +357,7 @@ def calculate_velocity2D(phase2D, p_grid):
     Calculates the velocity of the condensate.
     v = hbar/m * (grad(phase))
     For the calculation of the gradient, spectral derivative is used.
+    It is assumed that the 2D plane is the n1-n3 defined plane.
     Note: the result needs to be multiplied by hbar/m
     Args:
     -----
@@ -395,7 +396,18 @@ def rms_radius(psi, x1, x2, x3, space_grid, grid_size):
     """
     Calculates the RMS radius of the condensate.
     
-    RMS = {1/(n1*n2*n3) * Sum[(r-center)**2 * |psi|**2]}**0.5 
+    RMS = {1/(n1*n2*n3) * Sum[(r-center)**2 * |psi|**2]}**0.5
+
+    Args:
+    -----
+    psi: torch.Tensor, the normalised wavefunction
+    x1, x2, x3: torch.Tensor, the space axes
+    space_grid: torch.Tensor, the meshgrid of the space
+    grid_size: Tuple[int], the grid size
+
+    Returns:
+    --------
+    rms: torch.Tensor, a single value of the RMS calculation
     """
     n1, n2, n3 = grid_size
     center_x = x1[len(x1)//2] 
