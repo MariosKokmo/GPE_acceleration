@@ -392,7 +392,7 @@ def write_phase(phase, count, x1, x2, x3, n1, n2, n3, a_ho):
                     fourth = phase[i,j,k]
                     f.write(f'{first},{second},{third},{fourth}\n')
 
-def rms_radius(psi, x1, x2, x3, space_grid, grid_size):
+def rms_radius(psi, center, space_grid):
     """
     Calculates the RMS radius of the condensate.
     
@@ -403,21 +403,19 @@ def rms_radius(psi, x1, x2, x3, space_grid, grid_size):
     psi: torch.Tensor, the normalised wavefunction
     x1, x2, x3: torch.Tensor, the space axes
     space_grid: torch.Tensor, the meshgrid of the space
-    grid_size: Tuple[int], the grid size
 
     Returns:
     --------
     rms: torch.Tensor, a single value of the RMS calculation
     """
-    n1, n2, n3 = grid_size
-    center_x = x1[len(x1)//2] 
-    center_y = x2[len(x2)//2] 
-    center_z = x3[len(x3)//2]
-    dimN = n1*n2*n3
+    center_x = center[0] 
+    center_y = center[1]
+    center_z = center[2]
+    N_tot = torch.where(torch.abs(psi)**2 > 0, 1, 0).sum()
     # build the r-space squared.
     g_x, g_y, g_z = space_grid
     d_sq = (g_x-center_x)**2 + (g_y-center_y)**2 + (g_z-center_z)**2
-    rms = (torch.sum(d_sq * (torch.abs(psi)**2))/(dimN))**0.5
+    rms = (torch.sum(d_sq * (torch.abs(psi)**2))/(N_tot))**0.5
     return rms
 
 def write_phase2D(phase, count, x1, x3, n1, n2, n3, a_ho):

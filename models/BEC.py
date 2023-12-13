@@ -11,6 +11,7 @@ from sys import platform
 class BEC:
     def __init__(self, parameters, system, app):
         self.psi = None
+        self.write_velocity = app.write_velocity
         self.device = app.device
         self.logger = app.logger
         self.time = app.time
@@ -198,7 +199,8 @@ class BEC:
                         vort_charge=vort_charge,
                         n1=n1,n3=n3
                         )
-                    utils.video_creation.create_velocity_video(count,\
+                    if self.write_velocity:
+                        utils.video_creation.create_velocity_video(count,\
                                                                SimulationName,\
                                                                n1,n3)
 
@@ -221,7 +223,8 @@ class BEC:
                         vort_charge=vort_charge,
                         n1=n1,n3=n3
                         )
-        utils.video_creation.create_velocity_video(count,\
+        if self.write_velocity:
+            utils.video_creation.create_velocity_video(count,\
                                                     SimulationName,\
                                                     n1,n3)
         

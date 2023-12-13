@@ -5,6 +5,7 @@ class application:
     def __init__(self):
         self.logger = None
         self.device = None
+        self.write_velocity = False
 
     def set_logger(self, logger):
         self.logger = logger
