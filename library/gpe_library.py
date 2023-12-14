@@ -98,7 +98,7 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
 
     # Real space grid
     g_x, g_y, g_z = torch.meshgrid(x1[0], x2[0], x3[0])
-    space_grid = [g_x, g_y, g_z]
+    space_grid = (g_x.to(device=device), g_y.to(device=device), g_z.to(device=device))
     return x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid
 
 def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):
