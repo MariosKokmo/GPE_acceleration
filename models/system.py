@@ -17,6 +17,7 @@ class System:
         self.p_grid = None
         # real space grid (3D)
         self.space_grid = None
+        self.center = None
         self.simulation_parameters = None
         # the selected external potential
         self.uext = None
@@ -66,3 +67,4 @@ class System:
         self.p_sq = p_sq
         self.p_grid = p_grid
         self.space_grid = space_grid
+        self.center = [x1[n1//2], x2[n2//2], x3[n3//2]]

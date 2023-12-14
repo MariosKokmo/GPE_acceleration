@@ -134,6 +134,7 @@ class BEC:
         uext = self.system.uext.potential
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
         u = self.system.simulation_parameters["u"]
+        rms_measurements = {}
 
         if self.parameters["vortex_excitation"]:
             # Vortex related
@@ -184,9 +185,14 @@ class BEC:
             utot = u*torch.abs(self.psi)**2 + uext # Total potential shape (n1,n2,n3)
 
             if (iteration%(kmax/shots) == 0):
+                # Write some data
                 gpe.write_data(self.psi, count, x1, x3, n1, n3, a_ho)
                 cur_phase = self._extract_phase()
-                gpe.write_velocity2D(cur_phase, count, x1, x3, n1, n2, n3, a_ho, p_grid)
+                if self.write_velocity:
+                    gpe.write_velocity2D(cur_phase, count, x1, x3, n1, n2, n3, a_ho, p_grid)
+                rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
+                rms_measurements[count] = rms
+                
                 count += 1
                 self.logger.write(f"t = {t/omega_ho}\n")
                 if count%40==0:
@@ -214,6 +220,10 @@ class BEC:
             # split-step evolution
             self._step(utot, dtau, p_sq, d_x)
         
+
+        # Write the RMS measurements in a file
+        gpe.write_rms(rms_measurements, SimulationName)
+
         # create the full video
         utils.video_creation.create_video(count,\
                         repetitive=repetitive,\

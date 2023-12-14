@@ -89,7 +89,7 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     p3[0][n3//2:] = dp[2] * (torch.arange(n3//2, n3) - n3)
 
     # build the p-space squared. Useful for the FFT later
-    g_px, g_py, g_pz = torch.meshgrid(p1[0], p2[0], p3[0], indexing='ij')
+    g_px, g_py, g_pz = torch.meshgrid(p1[0], p2[0], p3[0])
     p_sq = g_px**2 + g_py**2 + g_pz**2
     p_sq = p_sq.to(device=device)
 
@@ -97,7 +97,7 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     p_grid = (g_px.to(device=device), g_py.to(device=device), g_pz.to(device=device))
 
     # Real space grid
-    g_x, g_y, g_z = torch.meshgrid(x1[0], x2[0], x3[0], indexing='ij')
+    g_x, g_y, g_z = torch.meshgrid(x1[0], x2[0], x3[0])
     space_grid = [g_x, g_y, g_z]
     return x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid
 
@@ -396,12 +396,12 @@ def rms_radius(psi, center, space_grid):
     """
     Calculates the RMS radius of the condensate.
     
-    RMS = {1/(n1*n2*n3) * Sum[(r-center)**2 * |psi|**2]}**0.5
+    RMS = {1/(N) * Sum[(r-center)**2 * |psi|**2]}**0.5
 
     Args:
     -----
     psi: torch.Tensor, the normalised wavefunction
-    x1, x2, x3: torch.Tensor, the space axes
+    center: torch.Tensor, the centers of the space axes x1, x2, x3
     space_grid: torch.Tensor, the meshgrid of the space
 
     Returns:
@@ -417,6 +417,16 @@ def rms_radius(psi, center, space_grid):
     d_sq = (g_x-center_x)**2 + (g_y-center_y)**2 + (g_z-center_z)**2
     rms = (torch.sum(d_sq * (torch.abs(psi)**2))/(N_tot))**0.5
     return rms
+
+def write_rms(rms_meas, SimulationName):
+  """
+  writes the RMS radius measurements for the BEC
+  in a default file 'rms_meas.txt'
+  """
+  with open(f'{SimulationName}_RMS_meas.txt', 'w') as f:
+    f.write("t\tr\n")
+    for t, r in rms_meas.items():
+      f.write(f"{t}\t{r}\n")
 
 def write_phase2D(phase, count, x1, x3, n1, n2, n3, a_ho):
     """
