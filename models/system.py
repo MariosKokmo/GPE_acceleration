@@ -67,4 +67,5 @@ class System:
         self.p_sq = p_sq
         self.p_grid = p_grid
         self.space_grid = space_grid
-        self.center = [x1[n1//2], x2[n2//2], x3[n3//2]]
+        self.center = (x1[n1//2], x2[n2//2], x3[n3//2])
+        

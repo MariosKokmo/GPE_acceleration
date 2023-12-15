@@ -1,7 +1,7 @@
 {
     "Grid_positive_limits":[60, 1.5, 60],
     "Grid_negative_limits":[-60, -1.5, -60],
-    "Grid_resolution":[16, 16, 16],
+    "Grid_resolution":[4, 4, 4],
     "Trapping_frequencies":[20, 300, 20],
     "Potential_type":"harmonic",
     "Total_simulation_time":150e-3,
