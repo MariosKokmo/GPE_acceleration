@@ -97,7 +97,7 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     p_grid = (g_px.to(device=device), g_py.to(device=device), g_pz.to(device=device))
 
     # Real space grid
-    g_x, g_y, g_z = torch.meshgrid(x1[0], x2[0], x3[0])
+    g_x, g_y, g_z = torch.meshgrid(x1, x2, x3)
     space_grid = (g_x.to(device=device), g_y.to(device=device), g_z.to(device=device))
     return x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid
 
