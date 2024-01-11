@@ -39,6 +39,7 @@ def get_simulation_combinations(sims):
   vortex_excitation = sims["vortex_excitation"]
   imprint_position_x = sims["imprint_position_x"]
   imprint_position_y = sims["imprint_position_y"]
+  imprint_times = sims["imprint_times"]
   assert repetitive==0 or repetitive==1
   if repetitive:
     max_imprints = sims['max_imprints']
@@ -51,7 +52,8 @@ def get_simulation_combinations(sims):
       parameters_repetitive.append({"vortex_charge":charges[i], "vortex_position_x":vortex_position_x[i],\
                                      "vortex_position_y":vortex_position_y[i], "max_imprints":max_imprints[i],\
                                      "imprint_every":imprint_every[i], "repetitive":repetitive, "imprinting_charge":imprinting_charge[i],\
-                                     "imprint_position_x":imprint_position_x[i], "imprint_position_y":imprint_position_y[i],"vortex_excitation":vortex_excitation})
+                                     "imprint_position_x":imprint_position_x[i], "imprint_position_y":imprint_position_y[i],\
+                                     "imprint_times":imprint_times[i], "vortex_excitation":vortex_excitation})
     simulations = _simulations_repetitive(parameters_repetitive)
   else:
     parameters_multi_vortex = []
@@ -59,7 +61,8 @@ def get_simulation_combinations(sims):
       parameters_multi_vortex.append({"vortex_charge":charges[i], "vortex_position_x":vortex_position_x[i],\
                                        "vortex_position_y":vortex_position_y[i], "max_imprints":max_imprints[i],\
                                        "imprint_every":imprint_every[i], "repetitive":repetitive,\
-                                       "imprint_position_x":imprint_position_x[i], "imprint_position_y":imprint_position_y[i], "vortex_excitation":vortex_excitation})
+                                       "imprint_position_x":imprint_position_x[i], "imprint_position_y":imprint_position_y[i],\
+                                       "vortex_excitation":vortex_excitation,"imprint_times":imprint_times[i]})
     simulations = _simulations_multi_vortex(parameters_multi_vortex)
   return simulations
 
@@ -159,7 +162,19 @@ def get_simulation_parameters(ConfigFilePath):
   imprint_position_y = sim_params["imprint_position_y"]
   # Re-imprint
   imprint_every = sim_params["imprint_every"]
+  imprint_times = sim_params["imprint_times"]
   max_imprints = sim_params["max_imprints"]
+
+  if len(imprint_every) != len(imprint_times):
+      raise ValueError("FATAL. imprint_every and imprint_times have different number of simulations. Make sure you write an empty list [] when not using exact times.")
+  
+  for i in range(len(imprinting_charge)):
+      # for every simulation i.e. charge, we set
+      # the imprint times if not given
+      if len(imprint_times[i]) == 0:
+        time_step = imprint_every[i]
+        imprint_times[i] = [ time_step * j for j in range(1,max_imprints[i]+1)]
+  
   repetitive = sim_params["repetitive"]
   # harmonic potential length scale in meters
   a_ho = math.sqrt(CONSTANTS.hbar/CONSTANTS.m1/omega_ho)  
@@ -185,6 +200,7 @@ def get_simulation_parameters(ConfigFilePath):
       "dx":dx,
       "dp":dp,
       "dtau":dtau,
+      "Total_simulation_time":t_evol,
       "kmax":kmax,
       "u":u,
       "a_ho":a_ho,
@@ -200,10 +216,11 @@ def get_simulation_parameters(ConfigFilePath):
       "imprint_position_x":imprint_position_x,
       "imprint_position_y":imprint_position_y,
       "imprint_every":imprint_every,
+      "imprint_times":imprint_times,
       "max_imprints":max_imprints,
       "repetitive":repetitive
   }
-  ok, msg = _check_simulation_parameters(simulation_params)
+  ok, msg = _check_simulation_parameters(simulation_params)  
   if not ok:
     print(msg)
   return simulation_params, msg
@@ -271,4 +288,19 @@ def _check_simulation_parameters(simulation_params):
           if len(charges) != len(simulation_params["imprint_position_y"][index]):
               msg = f"The number of imprinting charges doesn't agree with the number of y positions at index {index}"
               return False, msg
+          
+  ##################################
+  ## Perform reimprint checks  #####
+  ##################################
+  sim_time = simulation_params["Total_simulation_time"] # time in sec
+  if len(simulation_params["imprint_times"]) != len(simulation_params["imprinting_charge"]):
+    msg = f"One list of imprinting times should be given for every simulation"
+    return True, msg
+  for index, times in enumerate(simulation_params["imprint_times"]):
+    # check that the maximum imprint time is less than simulation time
+    # imprint times are given in ms
+    if max(times)/1000 > sim_time:
+      msg = f"The maximum imprint time is greater than the total simulation time for simulation {index+1}"
+      return True, msg
+    
   return True, None
