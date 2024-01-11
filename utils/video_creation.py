@@ -26,7 +26,6 @@ def create_video(count,\
 
   for framenum in range(frames):
     file_path = f'R-{framenum:003}-cd.dat'
-    print(file_path)
     file = open(file_path,'r')
     img=np.reshape(np.loadtxt(file, delimiter=',', usecols=2),VideoDims)
     file.close()
@@ -57,7 +56,6 @@ def create_velocity_video(count,\
 
   for framenum in range(frames):
     file_path = f'V-{framenum:003}-cd.dat'
-    print(file_path)
     file = open(file_path,'r')
     img=np.reshape(np.loadtxt(file, delimiter=',', usecols=2),VideoDims)
     file.close()

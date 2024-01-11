@@ -9,12 +9,13 @@
     "snapshots":150,
     "vortex_excitation":1,
     "repetitive":1,
-    "vortex_charge":[2],
-    "imprinting_charge":[1],
-    "vortex_position_x":[0],
-    "vortex_position_y":[0],
-    "imprint_position_x":[0],
-    "imprint_position_y":[0],
-    "imprint_every":[20],
-    "max_imprints":[2]
+    "vortex_charge":[2, 5],
+    "imprinting_charge":[1, 3],
+    "vortex_position_x":[0, 0],
+    "vortex_position_y":[0, 0],
+    "imprint_position_x":[0, 0],
+    "imprint_position_y":[0, 0],
+    "imprint_every":[20, 50],
+    "imprint_times":[[10, 20, 50, 100], []],
+    "max_imprints":[3, 2]
 }

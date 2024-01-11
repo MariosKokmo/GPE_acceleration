@@ -63,4 +63,43 @@ One configuration file is needed for each grid and/or potential configuration. M
 
  The configuration file can be built for either an array of vortices or vortices that will be repetitively imprinted.
 
- Checks on the inputs of the configuration file will be performed before setting up the simulations. 
+ Checks on the inputs of the configuration file will be performed before setting up the simulations.
+
+ **HOW TO CREATE THE CONFIGURATION FILE**
+- "Grid_positive_limits": These are the 3D grid axes in microns e.g. [60, 1.5, 60],
+- "Grid_negative_limits": Usually the grid is symmetric and the potential is considered centered e.g. [-60, -1.5, -60],
+- "Grid_resolution": This is the number of points along each one of the axes e.g.[512, 16, 512] for a flat BEC,
+- "Trapping_frequencies": These are the frequencies in Hz [20, 300, 20],
+- "Potential_type":e.g. "harmonic" For a full list see below,
+- "Total_simulation_time":150e-3, in sec,
+- "dt":5e-7, the time resolution of the simulation in sec,
+- "snapshots":150, the number of snapshot data to be generated. Each file can be several Mb. For more intuitive results set it the same as the total time so that each snapshot is 1ms,
+- "vortex_excitation":1, This is used as a boolean that indicates the topological excitation we are simulating,
+- "repetitive":1, Indicates that repetitive imprinting is used,
+
+For the rest it is expected that the lists contain as many elements as the simulations we want to run. Each element of the list (could be a list itself) is a separate configuration
+- "vortex_charge":[2, 5], List of initial charges,
+- "imprinting_charge":[1, 3],
+- "vortex_position_x":[0, 0],
+- "vortex_position_y":[0, 0],
+- "imprint_position_x":[0, 0],
+- "imprint_position_y":[0, 0],
+- "imprint_every":[20, 50],
+- "imprint_times":[[10,20,50], []],
+- "max_imprints":[3, 2]
+
+The above configuration would give 2 simulations.
+
+_First simulation_:
+
+We start with an initial vortex of charge 2 at position (0,0). We then want to imprint a vortex of charge 1 at position (0,0). Because we give exact times to imprint, this overrides the "imprint_every" parameter which is 20, and the imprints will happen at the exact times 10, 20 and 50. Also note that the "max_imprints" are 3 for this simulation so all the imprints will happen.
+
+_Second simulation_:
+
+We start with an initial vortex of charge 5 at position (0,0). We then imprint a vortex of charge 3 at position (0,0). Now we don't give exact times to imprint, so the "imprint_every" value of 50 will create the times. The imprints times will be 50, 100, 150. However, because the "max_imprints" are 2, only the imprints at times 50 and 100 will occur. Note that even that we give an "imprint_every" value, we have to give an empty list for the "imprint_times" otherwise an error will be raised. The software needs to be able to align the inputs at the same length.
+
+List of available potentials:
+- **harmonic** , a harmonic potential with 3 trapping frequencies
+- **constant**, a constant potential across the whole grid
+- **ramp**, potential that ramps up from an initial to a final amplitude in a linear fashion
+- **rampharmonic**, harmonic potential whose amplitude ramps up linearly in time

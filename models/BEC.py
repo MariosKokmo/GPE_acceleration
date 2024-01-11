@@ -151,6 +151,7 @@ class BEC:
             vort_y = np.array([vort_y])
             imprint_position_x = np.array([imprint_position_x])
             imprint_position_y = np.array([imprint_position_y])
+            imprint_times = self.parameters["imprint_times"]
             vort_charge = np.array([charges])
             imprinting_charge = np.array([imprinting_charge])
             vortices = np.vstack((vort_x, vort_y, vort_charge))
@@ -172,6 +173,7 @@ class BEC:
         ##############################################################################
 
         num_imprints = 0 # there has already been 1 imprint, the initial one
+        imprintTime = imprint_times[num_imprints]
         count = 0
         wait = 5
         if repetitive:
@@ -184,6 +186,7 @@ class BEC:
             t = dt*iteration*omega_ho
             utot = u*torch.abs(self.psi)**2 + uext # Total potential shape (n1,n2,n3)
 
+            # write data file
             if (iteration%(kmax/shots) == 0):
                 # Write some data
                 gpe.write_data(self.psi, count, x1, x3, n1, n3, a_ho)
@@ -211,8 +214,10 @@ class BEC:
                                                                n1,n3)
 
             # Repetitive imprinting
-            if (iteration%((kmax//shots)*imprint_every) == 0) and (num_imprints < max_imprints) and (count>wait) and repetitive:
+            if (iteration%((kmax//shots)*imprintTime) == 0) and (num_imprints < max_imprints) and (count>wait) and repetitive:
                 num_imprints += 1
+                if num_imprints < max_imprints:# to avoid out-of-bounds index
+                    imprintTime = imprint_times[num_imprints]
                 print("Imprinting again...")
                 self.logger.write(f"[INFO]: {self.time()} -- Imprinting again...\n")
                 self._repetitive_imprint()
