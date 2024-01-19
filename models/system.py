@@ -7,7 +7,7 @@ class System:
     def __init__(self, app):
         self.app = app
         self.device = self.app.device
-        self.logger = self.app.logger
+        self.logger = self.app.open_logger()
         self.time = app.time
         self.space_axes = None
         self.momentum_axes = None
@@ -23,6 +23,7 @@ class System:
         self.uext = None
         # call the parameter initialisation
         self._initialise_parameters()
+        self.app.close_logger()
         
     def _initialise_parameters(self):
         """
@@ -33,6 +34,7 @@ class System:
         if not self.logger:
             raise Exception("Logger needs to be set before the system")
         self.simulation_parameters, fault = setup_simulations.get_simulation_parameters("configuration_file.json")
+        
         if fault:
             self.logger.write("[FATAL]: {} -- {}".format(self.time(), fault))
             raise Exception("there is an error in the configuration file")

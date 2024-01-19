@@ -4,9 +4,9 @@
     "Grid_resolution":[4, 4, 4],
     "Trapping_frequencies":[20, 300, 20],
     "Potential_type":"harmonic",
-    "Total_simulation_time":150e-3,
+    "Total_simulation_time":15e-3,
     "dt":5e-7,
-    "snapshots":150,
+    "snapshots":15,
     "vortex_excitation":1,
     "repetitive":1,
     "vortex_charge":[2, 5],
@@ -15,7 +15,7 @@
     "vortex_position_y":[0, 0],
     "imprint_position_x":[0, 0],
     "imprint_position_y":[0, 0],
-    "imprint_every":[20, 50],
-    "imprint_times":[[10, 20, 50, 100], []],
-    "max_imprints":[3, 2]
+    "imprint_every":[20, 10],
+    "imprint_times":[[10], []],
+    "max_imprints":[1, 1]
 }

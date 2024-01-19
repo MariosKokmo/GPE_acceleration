@@ -6,11 +6,13 @@ from models.simulation import Simulations
 def main():
     # Set up the application
     app = application.application()
-    logfile = open("log.txt", "w")
+    logfile = "log.txt"
     app.set_logger(logfile)
     DEVICE = torch.device('cuda') if torch.cuda.is_available() else 'cpu'
     app.set_device(DEVICE)
+    app.open_logger()
     app.logger.write(f"[INFO]: {app.time()} -- Running on {DEVICE}.\n")
+    app.close_logger()
 
     # Set up the external system
     system = System(app)
@@ -22,8 +24,9 @@ def main():
     simulations.run_simulations()
     
     # close log file and exit
+    app.open_logger()
     app.logger.write(f"[INFO]: {app.time()} -- Finished all simulations.\n")
-    app.logger.close()
+    app.close_logger()
 
 if __name__ == "__main__":
     main()
