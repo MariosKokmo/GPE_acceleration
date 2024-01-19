@@ -161,8 +161,9 @@ class BEC:
         # initialise the BEC on the ground state
         self._initialise()
 
-        # calculate the repetitive imprinting phase
-        self._calculate_repetitive_phase(imprinting_vortices)
+        if repetitive:
+            # calculate the repetitive imprinting phase
+            self._calculate_repetitive_phase(imprinting_vortices)
 
         # imprint the topological excitation
         self._imprint_vortices(vortices)
@@ -172,7 +173,7 @@ class BEC:
         ##############    MAIN LOOP OF SIMULATION    #################################
         ##############################################################################
 
-        num_imprints = 0 # there has already been 1 imprint, the initial one
+        num_imprints = 0 # counts the additional imprints beyond the initial one
         imprintTime = imprint_times[num_imprints]
         count = 0
         wait = 5

@@ -3,6 +3,7 @@ import utils.setup_simulations as setup_simulations
 from models.BEC import BEC
 import os
 from pathlib import Path
+import torch
 
 class Simulations:
     """
@@ -55,3 +56,5 @@ class Simulations:
             parent_path = path.parent.absolute()
             os.chdir(parent_path)
             self.app.close_logger()
+            # free unused memory
+            torch.cuda.empty_cache()
