@@ -65,7 +65,9 @@ One configuration file is needed for each grid and/or potential configuration. M
 
  Checks on the inputs of the configuration file will be performed before setting up the simulations.
 
- **HOW TO CREATE THE CONFIGURATION FILE**
+ # HOW TO CREATE THE CONFIGURATION FILE
+ **Important** -- Each configuration file is strictly for one grid and potential configuration. Multiple simulations can be run in sequence but all have to be on the same grid and potential with the same ground state.
+
 - "Grid_positive_limits": These are the 3D grid axes in microns e.g. [60, 1.5, 60],
 - "Grid_negative_limits": Usually the grid is symmetric and the potential is considered centered e.g. [-60, -1.5, -60],
 - "Grid_resolution": This is the number of points along each one of the axes e.g.[512, 16, 512] for a flat BEC,
@@ -89,6 +91,8 @@ For the rest it is expected that the lists contain as many elements as the simul
 - "max_imprints":[3, 2]
 
 The above configuration would give 2 simulations.
+
+**NOTE: When we give "imprint_times", those override the "imprint_every" parameter. We need to give an empty list for the "imprint_times" if we want them to be automatically calculated based on the "imprint_every" parameter**
 
 _First simulation_:
 
