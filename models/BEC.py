@@ -161,8 +161,9 @@ class BEC:
         # initialise the BEC on the ground state
         self._initialise()
 
-        # calculate the repetitive imprinting phase
-        self._calculate_repetitive_phase(imprinting_vortices)
+        if repetitive:
+            # calculate the repetitive imprinting phase
+            self._calculate_repetitive_phase(imprinting_vortices)
 
         # imprint the topological excitation
         self._imprint_vortices(vortices)
@@ -172,7 +173,7 @@ class BEC:
         ##############    MAIN LOOP OF SIMULATION    #################################
         ##############################################################################
 
-        num_imprints = 0 # there has already been 1 imprint, the initial one
+        num_imprints = 0 # counts the additional imprints beyond the initial one
         imprintTime = imprint_times[num_imprints]
         count = 0
         wait = 5
@@ -200,12 +201,8 @@ class BEC:
                 self.logger.write(f"t = {t/omega_ho}\n")
                 if count%40==0:
                 # create the video in the current folder
-                    utils.video_creation.create_video(count,\
-                        repetitive=repetitive,\
-                        max_imprints=max_imprints,\
-                        imprint_every=imprint_every,\
-                        vort_x=vort_x,\
-                        vort_charge=vort_charge,
+                    utils.video_creation.create_video(count=count,\
+                        simulation_name=SimulationName,\
                         n1=n1,n3=n3
                         )
                     if self.write_velocity:
@@ -230,12 +227,8 @@ class BEC:
         gpe.write_rms(rms_measurements, SimulationName)
 
         # create the full video
-        utils.video_creation.create_video(count,\
-                        repetitive=repetitive,\
-                        max_imprints=max_imprints,\
-                        imprint_every=imprint_every,\
-                        vort_x=vort_x,\
-                        vort_charge=vort_charge,
+        utils.video_creation.create_video(count=count,\
+                        simulation_name=SimulationName,\
                         n1=n1,n3=n3
                         )
         if self.write_velocity:
