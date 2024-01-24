@@ -59,10 +59,10 @@ def get_simulation_combinations(sims):
     parameters_multi_vortex = []
     for i in range(len(charges)):
       parameters_multi_vortex.append({"vortex_charge":charges[i], "vortex_position_x":vortex_position_x[i],\
-                                       "vortex_position_y":vortex_position_y[i], "max_imprints":max_imprints[i],\
-                                       "imprint_every":imprint_every[i], "repetitive":repetitive, "imprinting_charge":imprinting_charge[i],\
-                                       "imprint_position_x":imprint_position_x[i], "imprint_position_y":imprint_position_y[i],\
-                                       "vortex_excitation":vortex_excitation,"imprint_times":imprint_times[i]})
+                                       "vortex_position_y":vortex_position_y[i], "max_imprints":0,\
+                                       "imprint_every":0, "repetitive":repetitive, "imprinting_charge":[],\
+                                       "imprint_position_x":[], "imprint_position_y":[],\
+                                       "vortex_excitation":vortex_excitation,"imprint_times":[]})
     simulations = _simulations_multi_vortex(parameters_multi_vortex)
   return simulations
 
@@ -173,12 +173,13 @@ def get_simulation_parameters(ConfigFilePath):
       msg = "FATAL. imprint_every and imprint_times have different number of simulations. Make sure you write an empty list [] when not using exact times."
       return None, msg
   
-  for i in range(len(imprinting_charge)):
-      # for every simulation i.e. charge, we set
-      # the imprint times if not given
-      if len(imprint_times[i]) == 0:
-        time_step = imprint_every[i]
-        imprint_times[i] = [ time_step * j for j in range(1,max_imprints[i]+1)]
+  if repetitive:
+    for i in range(len(imprinting_charge)):
+        # for every simulation i.e. charge, we set
+        # the imprint times if not given
+        if len(imprint_times[i]) == 0:
+          time_step = imprint_every[i]
+          imprint_times[i] = [ time_step * j for j in range(1,max_imprints[i]+1)]
   
   # harmonic potential length scale in meters
   a_ho = math.sqrt(CONSTANTS.hbar/CONSTANTS.m1/omega_ho)  
@@ -251,6 +252,10 @@ def _check_simulation_parameters(simulation_params):
       if abs(x_min) != abs(xmaxs[index]):
           msg = f"{index+1} max and min are not symmetric. Grid is assumed symmetric."
           return False, msg
+  n1, n2, n3 = simulation_params["Grid_resolution"]
+  if min(simulation_params["Grid_resolution"])<= 0:
+     msg = f"The grid resolution must be greater than zero"
+     return False, msg
   
   ##################################
   #### Perform frequency checks ####
@@ -276,12 +281,24 @@ def _check_simulation_parameters(simulation_params):
   for index, charges in enumerate(simulation_params["vortex_charge"]):
       if isinstance(charges, list):
           if len(charges) != len(simulation_params["vortex_position_x"][index]):
-              msg = f"The number of charges doesn't agree with the number of x positions at index {index}"
+              msg = f"The number of charges doesn't agree with the number of x positions for simulation {index+1}"
               return False, msg
           if len(charges) != len(simulation_params["vortex_position_y"][index]):
-              msg = f"The number of charges doesn't agree with the number of y positions at index {index}"
+              msg = f"The number of charges doesn't agree with the number of y positions for simulation {index+1}"
               return False, msg
-  
+          if max(simulation_params["vortex_position_x"][index]) > n1//2:
+             msg = f"The maximum n1 position for simulation {index+1}, {max(simulation_params['vortex_position_x'][index])} is greater than half the grid size {n1//2}"
+             return False, msg
+          if max(simulation_params["vortex_position_y"][index]) > n3//2:
+             msg = f"The maximum n3 position for simulation {index+1}, {max(simulation_params['vortex_position_y'][index])} is greater than half the grid size {n3//2}"
+             return False, msg
+          if min(simulation_params["vortex_position_x"][index]) < -n1//2:
+             msg = f"The minimum n1 position for simulation {index+1}, {min(simulation_params['vortex_position_x'][index])} is less than half the grid size {-n1//2}"
+             return False, msg
+          if min(simulation_params["vortex_position_y"][index]) < -n3//2:
+             msg = f"The minimum n3 position for simulation {index+1}, {min(simulation_params['vortex_position_y'][index])} is less than half the grid size {-n3//2}"
+             return False, msg
+          
           
   ##################################
   ## Perform reimprint checks  #####
