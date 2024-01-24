@@ -11,10 +11,10 @@ def create_video(count,\
                  ):
 
   FPS=10
-
+  SimulationName = simulation_name + f'_fps{FPS}_frame{count}'
   VideoDims=(n1,n3)
   frames=count
-  video=VideoWriter(f'{simulation_name}.mp4', 0x7634706d, float(FPS), VideoDims)
+  video=VideoWriter(f'{SimulationName}.mp4', 0x7634706d, float(FPS), VideoDims)
 
   for framenum in range(frames):
     file_path = f'R-{framenum:003}-cd.dat'
