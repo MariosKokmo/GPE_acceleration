@@ -9,13 +9,14 @@ from pathlib import Path
 from sys import platform
 
 class BEC:
-    def __init__(self, parameters, system, app):
+    def __init__(self, parameters, system, app, simulation_name):
         self.psi = None
         self.write_velocity = app.write_velocity
         self.device = app.device
         self.logger = app.logger
         self.time = app.time
         self.parameters = parameters
+        self.simulation_name = simulation_name
         self.system = system
         self.gs_path = None
         self.repetitive_phase = None
@@ -145,17 +146,18 @@ class BEC:
             repetitive = self.parameters["repetitive"]
             vort_x = self.parameters["vortex_position_x"]
             vort_y = self.parameters["vortex_position_y"]
-            imprint_position_x = self.parameters["imprint_position_x"]
-            imprint_position_y = self.parameters["imprint_position_y"]
             vort_x = np.array([vort_x])
             vort_y = np.array([vort_y])
-            imprint_position_x = np.array([imprint_position_x])
-            imprint_position_y = np.array([imprint_position_y])
-            imprint_times = self.parameters["imprint_times"]
             vort_charge = np.array([charges])
-            imprinting_charge = np.array([imprinting_charge])
             vortices = np.vstack((vort_x, vort_y, vort_charge))
-            imprinting_vortices = np.vstack((imprint_position_x, imprint_position_y, imprinting_charge))
+            if repetitive:
+                imprinting_charge = np.array([imprinting_charge])
+                imprint_times = self.parameters["imprint_times"]
+                imprint_position_x = self.parameters["imprint_position_x"]
+                imprint_position_y = self.parameters["imprint_position_y"]
+                imprint_position_x = np.array([imprint_position_x])
+                imprint_position_y = np.array([imprint_position_y])
+                imprinting_vortices = np.vstack((imprint_position_x, imprint_position_y, imprinting_charge))
             
 
         # initialise the BEC on the ground state
@@ -174,14 +176,14 @@ class BEC:
         ##############################################################################
 
         num_imprints = 0 # counts the additional imprints beyond the initial one
-        imprintTime = imprint_times[num_imprints]
         count = 0
         wait = 5
         if repetitive:
+            imprintTime = imprint_times[num_imprints]
             self.logger.write(f"[INFO]: {self.time()} -- Will imprint every {imprint_every} snapshots for {max_imprints} times\n")
             SimulationName=f'{len(vort_x)}vortex__initCharge{vort_charge[0]}__imprintCharge{imprinting_charge[0]}_total_imprints{max_imprints}__every{imprint_every}'
         else:
-            SimulationName=f'{len(vort_x)}_{d}_{D}'
+            SimulationName=self.simulation_name
 
         for iteration in range(kmax):
             t = dt*iteration*omega_ho
@@ -211,7 +213,7 @@ class BEC:
                                                                n1,n3)
 
             # Repetitive imprinting
-            if (iteration%((kmax//shots)*imprintTime) == 0) and (num_imprints < max_imprints) and (count>wait) and repetitive:
+            if repetitive and (iteration%((kmax//shots)*imprintTime) == 0) and (num_imprints < max_imprints) and (count>wait):
                 num_imprints += 1
                 if num_imprints < max_imprints:# to avoid out-of-bounds index
                     imprintTime = imprint_times[num_imprints]

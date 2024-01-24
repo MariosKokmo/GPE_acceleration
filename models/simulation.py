@@ -48,7 +48,7 @@ class Simulations:
             self.logger.write(f"[INFO]: {self.time} -- Running: {simulation_name}, started at {self.time}\n")
             
             # define the BEC
-            self.BEC = BEC(parameters, self.system,  self.app)
+            self.BEC = BEC(parameters, self.system,  self.app, simulation_name)
             self.BEC.evolve()
 
             # go back to the parent directory to run the next sim
