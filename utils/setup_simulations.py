@@ -59,10 +59,10 @@ def get_simulation_combinations(sims):
     parameters_multi_vortex = []
     for i in range(len(charges)):
       parameters_multi_vortex.append({"vortex_charge":charges[i], "vortex_position_x":vortex_position_x[i],\
-                                       "vortex_position_y":vortex_position_y[i], "max_imprints":max_imprints[i],\
-                                       "imprint_every":imprint_every[i], "repetitive":repetitive, "imprinting_charge":imprinting_charge[i],\
-                                       "imprint_position_x":imprint_position_x[i], "imprint_position_y":imprint_position_y[i],\
-                                       "vortex_excitation":vortex_excitation,"imprint_times":imprint_times[i]})
+                                       "vortex_position_y":vortex_position_y[i], "max_imprints":0,\
+                                       "imprint_every":0, "repetitive":repetitive, "imprinting_charge":[],\
+                                       "imprint_position_x":[], "imprint_position_y":[],\
+                                       "vortex_excitation":vortex_excitation,"imprint_times":[]})
     simulations = _simulations_multi_vortex(parameters_multi_vortex)
   return simulations
 
@@ -82,7 +82,11 @@ def _simulations_repetitive(parameters_list):
     imprinting_charge = parameters["imprinting_charge"]
     max_imprints = parameters["max_imprints"]
     imprint_every = parameters["imprint_every"]
-    simulation_name = f'{len(charges)}vortex__initCharge{charges[0]}__imprintCharge{imprinting_charge[0]}__total_imprints{max_imprints}__every{imprint_every}_fps10'
+    if isinstance(charges, list):
+        numberCharges = len(charges)
+    else:
+        numberCharges = 1
+    simulation_name = f'{numberCharges}vortex__initCharge{charges}__imprintCharge{imprinting_charge}__total_imprints{max_imprints}__every{imprint_every}_fps10'
     simulations.append([simulation_name, parameters])
     print("creating folder: ", simulation_name)
     if not os.path.isdir(simulation_name):
@@ -173,12 +177,13 @@ def get_simulation_parameters(ConfigFilePath):
       msg = "FATAL. imprint_every and imprint_times have different number of simulations. Make sure you write an empty list [] when not using exact times."
       return None, msg
   
-  for i in range(len(imprinting_charge)):
-      # for every simulation i.e. charge, we set
-      # the imprint times if not given
-      if len(imprint_times[i]) == 0:
-        time_step = imprint_every[i]
-        imprint_times[i] = [ time_step * j for j in range(1,max_imprints[i]+1)]
+  if repetitive:
+    for i in range(len(imprinting_charge)):
+        # for every simulation i.e. charge, we set
+        # the imprint times if not given
+        if len(imprint_times[i]) == 0:
+          time_step = imprint_every[i]
+          imprint_times[i] = [ time_step * j for j in range(1,max_imprints[i]+1)]
   
   # harmonic potential length scale in meters
   a_ho = math.sqrt(CONSTANTS.hbar/CONSTANTS.m1/omega_ho)  
@@ -236,12 +241,26 @@ def _check_simulation_parameters(simulation_params):
     ok: bool, True if the checks pass, otherwise False
     msg: str, the fault that was detected
   """
+  ok, msg = True, ""
+
+  ok, msg = _perform_grid_checks(simulation_params)
+  
+  ok, msg = _perform_frequency_checks(simulation_params)
+  
+  ok, msg = _perform_vortex_checks(simulation_params)
+  
+  ok, msg = _perform_reimprint_checks(simulation_params)
+  
+  return ok, msg
+
+
+def _perform_grid_checks(simulation_params):
   ###################################
   ####### Perform grid checks #######
   ###################################
   # the minimums should be negative
   for index, x in enumerate(simulation_params["x_min"]):
-        if x > 0:
+      if x > 0:
           msg = f"x_min for axis {index+1} is not negative. Grid is assumed symmetric."
           return False, msg
   # the grid should be symmetric
@@ -251,7 +270,12 @@ def _check_simulation_parameters(simulation_params):
       if abs(x_min) != abs(xmaxs[index]):
           msg = f"{index+1} max and min are not symmetric. Grid is assumed symmetric."
           return False, msg
+  if min(simulation_params["Grid_resolution"])<= 0:
+      msg = f"The grid resolution must be greater than zero"
+      return False, msg
+  return True, ""
   
+def _perform_frequency_checks(simulation_params):
   ##################################
   #### Perform frequency checks ####
   ##################################
@@ -259,10 +283,13 @@ def _check_simulation_parameters(simulation_params):
       if freq <= 0:
           msg = f"Frequency {index+1} is negative or zero. Frequencies are assumed positives."
           return False, msg
-  
+  return True, ""
+
+def _perform_vortex_checks(simulation_params):
   ##################################
   #### Perform vortex checks #######
   ##################################
+  n1, n2, n3 = simulation_params["Grid_resolution"]
   # Check the number of combinations
   if len(simulation_params["vortex_charge"]) != len(simulation_params["vortex_position_x"]):
       msg = f"The list number of vortex charges doesn't agree with the list number of x positions"
@@ -276,37 +303,49 @@ def _check_simulation_parameters(simulation_params):
   for index, charges in enumerate(simulation_params["vortex_charge"]):
       if isinstance(charges, list):
           if len(charges) != len(simulation_params["vortex_position_x"][index]):
-              msg = f"The number of charges doesn't agree with the number of x positions at index {index}"
+              msg = f"The number of charges doesn't agree with the number of x positions for simulation {index+1}"
               return False, msg
           if len(charges) != len(simulation_params["vortex_position_y"][index]):
-              msg = f"The number of charges doesn't agree with the number of y positions at index {index}"
+              msg = f"The number of charges doesn't agree with the number of y positions for simulation {index+1}"
               return False, msg
-  
-          
+          if max(simulation_params["vortex_position_x"][index]) > n1//2:
+              msg = f"The maximum n1 position for simulation {index+1}, {max(simulation_params['vortex_position_x'][index])} is greater than half the grid size {n1//2}"
+              return False, msg
+          if max(simulation_params["vortex_position_y"][index]) > n3//2:
+              msg = f"The maximum n3 position for simulation {index+1}, {max(simulation_params['vortex_position_y'][index])} is greater than half the grid size {n3//2}"
+              return False, msg
+          if min(simulation_params["vortex_position_x"][index]) < -n1//2:
+              msg = f"The minimum n1 position for simulation {index+1}, {min(simulation_params['vortex_position_x'][index])} is less than half the grid size {-n1//2}"
+              return False, msg
+          if min(simulation_params["vortex_position_y"][index]) < -n3//2:
+              msg = f"The minimum n3 position for simulation {index+1}, {min(simulation_params['vortex_position_y'][index])} is less than half the grid size {-n3//2}"
+              return False, msg
+  return True, ""
+
+def _perform_reimprint_checks(simulation_params):
   ##################################
   ## Perform reimprint checks  #####
   ##################################
   sim_time = simulation_params["Total_simulation_time"] # time in sec
   if simulation_params["repetitive"] and (len(simulation_params["imprint_times"]) != len(simulation_params["imprinting_charge"])):
-    msg = f"One list of imprinting times should be given for every simulation"
-    return True, msg
+      msg = f"One list of imprinting times should be given for every simulation"
+      return True, msg
   if simulation_params["repetitive"]:
-    if len(charges) != len(simulation_params["imprinting_charge"][index]):
-      msg = f"The list number of initial charges {len(charges)}, doesn't agree with the list number of imprinted {len(simulation_params['imprinting_charge'][index])}"
-      return False, msg
-    for index, charges in enumerate(simulation_params["imprinting_charge"]):
-      if isinstance(charges, list):
-          if len(charges) != len(simulation_params["imprint_position_x"][index]):
-              msg = f"The number of imprinting charges doesn't agree with the number of x positions at index {index}"
-              return False, msg
-          if len(charges) != len(simulation_params["imprint_position_y"][index]):
-              msg = f"The number of imprinting charges doesn't agree with the number of y positions at index {index}"
-              return False, msg
-    for index, times in enumerate(simulation_params["imprint_times"]):
+      if len(simulation_params["vortex_charge"]) != len(simulation_params["imprinting_charge"]):
+          msg = f"The list number of initial charges {len(simulation_params['vortex_charge'])}, doesn't agree with the list number of imprinted {len(simulation_params['imprinting_charge'])}"
+          return False, msg
+      for index, charges in enumerate(simulation_params["imprinting_charge"]):
+          if isinstance(charges, list):
+              if len(charges) != len(simulation_params["imprint_position_x"][index]):
+                  msg = f"The number of imprinting charges doesn't agree with the number of x positions at index {index}"
+                  return False, msg
+              if len(charges) != len(simulation_params["imprint_position_y"][index]):
+                  msg = f"The number of imprinting charges doesn't agree with the number of y positions at index {index}"
+                  return False, msg
+      for index, times in enumerate(simulation_params["imprint_times"]):
       # check that the maximum imprint time is less than simulation time
       # imprint times are given in ms
-      if max(times)/1000 > sim_time:
-        msg = f"The maximum imprint time is greater than the total simulation time for simulation {index+1}"
-        return True, msg
-    
-  return True, None
+          if max(times)/1000 > sim_time:
+              msg = f"The maximum imprint time is greater than the total simulation time for simulation {index+1}"
+              return True, msg
+  return True, ""
