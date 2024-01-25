@@ -82,7 +82,11 @@ def _simulations_repetitive(parameters_list):
     imprinting_charge = parameters["imprinting_charge"]
     max_imprints = parameters["max_imprints"]
     imprint_every = parameters["imprint_every"]
-    simulation_name = f'{len(charges)}vortex__initCharge{charges[0]}__imprintCharge{imprinting_charge[0]}__total_imprints{max_imprints}__every{imprint_every}_fps10'
+    if isinstance(charges, list):
+        numberCharges = len(charges)
+    else:
+        numberCharges = 1
+    simulation_name = f'{numberCharges}vortex__initCharge{charges}__imprintCharge{imprinting_charge}__total_imprints{max_imprints}__every{imprint_every}_fps10'
     simulations.append([simulation_name, parameters])
     print("creating folder: ", simulation_name)
     if not os.path.isdir(simulation_name):
@@ -327,8 +331,8 @@ def _perform_reimprint_checks(simulation_params):
       msg = f"One list of imprinting times should be given for every simulation"
       return True, msg
   if simulation_params["repetitive"]:
-      if len(charges) != len(simulation_params["imprinting_charge"][index]):
-          msg = f"The list number of initial charges {len(charges)}, doesn't agree with the list number of imprinted {len(simulation_params['imprinting_charge'][index])}"
+      if len(simulation_params["vortex_charge"]) != len(simulation_params["imprinting_charge"]):
+          msg = f"The list number of initial charges {len(simulation_params['vortex_charge'])}, doesn't agree with the list number of imprinted {len(simulation_params['imprinting_charge'])}"
           return False, msg
       for index, charges in enumerate(simulation_params["imprinting_charge"]):
           if isinstance(charges, list):
