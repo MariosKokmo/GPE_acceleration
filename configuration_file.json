@@ -13,6 +13,7 @@
     "imprinting_charge":[[]],
     "vortex_position_x":[[0,0,0,0,0,0,0]],
     "vortex_position_y":[[-30,-20,-10,0,10,10,10]],
+    "initial_imprint_time":[5],
     "imprint_position_x":[[]],
     "imprint_position_y":[[]],
     "imprint_every":[],
