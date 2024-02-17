@@ -150,6 +150,7 @@ class BEC:
             vort_y = np.array([vort_y])
             vort_charge = np.array([charges])
             vortices = np.vstack((vort_x, vort_y, vort_charge))
+            initial_imprint_time = self.parameters["initial_imprint_time"]
             if repetitive:
                 imprinting_charge = np.array([imprinting_charge])
                 imprint_times = self.parameters["imprint_times"]
@@ -166,9 +167,6 @@ class BEC:
         if repetitive:
             # calculate the repetitive imprinting phase
             self._calculate_repetitive_phase(imprinting_vortices)
-
-        # imprint the topological excitation
-        self._imprint_vortices(vortices)
         
         # evolve the BEC and perform re-imprint
         ##############################################################################
@@ -188,6 +186,11 @@ class BEC:
         for iteration in range(kmax):
             t = dt*iteration*omega_ho
             utot = u*torch.abs(self.psi)**2 + uext # Total potential shape (n1,n2,n3)
+
+            # Perform the initial imprint
+            if (iteration%((kmax//shots)*initial_imprint_time) == 0):
+                # imprint the topological excitation for the first time
+                self._imprint_vortices(vortices)
 
             # write data file
             if (iteration%(kmax/shots) == 0):

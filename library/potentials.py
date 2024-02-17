@@ -6,6 +6,13 @@ import torch
 ###############################################################################
 def select_potential(potentialType, app, **simulation_parameters):
    potentialType = potentialType.strip().lower()
+   available_potentials = {
+      "harmonic" : HarmonicPot(app, **simulation_parameters),
+      "constant" : ConstPot(app, **simulation_parameters),
+      "ramp" : RampPot(app, **simulation_parameters),
+      "rampharmonic" : RampHarmonicPot(app, **simulation_parameters),
+      "custom" : CustomPot(app, **simulation_parameters),
+   }
    if potentialType == "harmonic":
       return HarmonicPot(app, **simulation_parameters)
    elif potentialType == "constant":
@@ -109,3 +116,19 @@ class RampHarmonicPot(Potential):
       self.pot = 0.5 * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
       self.potential = self.pot.to(device=app.device, dtype=torch.double)
       self.form = lambda t: initial + (amplitude - initial) * ((t-tinit) / (tfinal-tinit))
+
+class CustomPot(Potential):
+   def __init__(self, app, **kwargs):
+      n1, n2, n3 = kwargs["Grid_resolution"]
+      x_min = kwargs["x_min"]
+      dx = kwargs["dx"]
+      w = kwargs["w"]
+      # Build space and momentum grids
+      x1 = x_min[0] + torch.arange(n1, dtype=torch.float64)*dx[0] # size n1
+      x2 = x_min[1] + torch.arange(n2, dtype=torch.float64)*dx[1]
+      x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
+      gx, gy, gz = torch.meshgrid(x1, x2, x3)
+      self.pot = None
+      self.potential = None
+      self.form = None
+      assert (not self.pot) or (not self.potential) or (not self.form), "The potential is not configured yet."

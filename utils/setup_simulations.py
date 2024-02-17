@@ -37,6 +37,7 @@ def get_simulation_combinations(sims):
   vortex_position_x = sims["vortex_position_x"]
   vortex_position_y = sims["vortex_position_y"]
   vortex_excitation = sims["vortex_excitation"]
+  initial_imprint_time = sims["initial_imprint_time"]
   imprint_position_x = sims["imprint_position_x"]
   imprint_position_y = sims["imprint_position_y"]
   imprint_times = sims["imprint_times"]
@@ -53,15 +54,15 @@ def get_simulation_combinations(sims):
                                      "vortex_position_y":vortex_position_y[i], "max_imprints":max_imprints[i],\
                                      "imprint_every":imprint_every[i], "repetitive":repetitive, "imprinting_charge":imprinting_charge[i],\
                                      "imprint_position_x":imprint_position_x[i], "imprint_position_y":imprint_position_y[i],\
-                                     "imprint_times":imprint_times[i], "vortex_excitation":vortex_excitation})
+                                     "imprint_times":imprint_times[i], "initial_imprint_time": initial_imprint_time[i],"vortex_excitation":vortex_excitation})
     simulations = _simulations_repetitive(parameters_repetitive)
   else:
     parameters_multi_vortex = []
     for i in range(len(charges)):
       parameters_multi_vortex.append({"vortex_charge":charges[i], "vortex_position_x":vortex_position_x[i],\
                                        "vortex_position_y":vortex_position_y[i], "max_imprints":0,\
-                                       "imprint_every":0, "repetitive":repetitive, "imprinting_charge":[],\
-                                       "imprint_position_x":[], "imprint_position_y":[],\
+                                       "imprint_every":0, "repetitive":repetitive, "initial_imprint_time": initial_imprint_time[i],\
+                                       "imprinting_charge":[],"imprint_position_x":[], "imprint_position_y":[],\
                                        "vortex_excitation":vortex_excitation,"imprint_times":[]})
     simulations = _simulations_multi_vortex(parameters_multi_vortex)
   return simulations
@@ -167,6 +168,7 @@ def get_simulation_parameters(ConfigFilePath):
   vortex_position_y = sim_params["vortex_position_y"]
   imprint_position_x = sim_params["imprint_position_x"]
   imprint_position_y = sim_params["imprint_position_y"]
+  initial_imprint_time = sim_params["initial_imprint_time"]
   # Re-imprint
   repetitive = sim_params["repetitive"]
   imprint_every = sim_params["imprint_every"]
@@ -222,6 +224,7 @@ def get_simulation_parameters(ConfigFilePath):
       "imprinting_charge":imprinting_charge,
       "vortex_position_x":vortex_position_x,
       "vortex_position_y":vortex_position_y,
+      "initial_imprint_time":initial_imprint_time,
       "imprint_position_x":imprint_position_x,
       "imprint_position_y":imprint_position_y,
       "imprint_every":imprint_every,
