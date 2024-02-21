@@ -176,10 +176,12 @@ class BEC:
         num_imprints = 0 # counts the additional imprints beyond the initial one
         count = 0
         wait = 5
+        initial_imprint_occured = False
         if repetitive:
             imprintTime = imprint_times[num_imprints]
-            self.logger.write(f"[INFO]: {self.time()} -- Will imprint every {imprint_every} snapshots for {max_imprints} times\n")
-            SimulationName=f'{len(vort_x)}vortex__initCharge{vort_charge[0]}__imprintCharge{imprinting_charge[0]}_total_imprints{max_imprints}__every{imprint_every}'
+            imprint_times_str = "_".join([str(time) for time in imprint_times])
+            self.logger.write(f"[INFO]: {self.time()} -- Will imprint at the following times : {imprint_times_str}\n")
+            SimulationName=f'{len(vort_x)}vortex__initCharge{vort_charge[0]}__imprintCharge{imprinting_charge[0]}_total_imprints{max_imprints}__times{imprint_times_str}'
         else:
             SimulationName=self.simulation_name
 
@@ -187,16 +189,12 @@ class BEC:
             t = dt*iteration*omega_ho
             utot = u*torch.abs(self.psi)**2 + uext # Total potential shape (n1,n2,n3)
 
-            # Perform the initial imprint
-            if (iteration%((kmax//shots)*initial_imprint_time) == 0):
-                # imprint the topological excitation for the first time
-                self._imprint_vortices(vortices)
-
             # write data file
             if (iteration%(kmax/shots) == 0):
                 # Write some data
                 gpe.write_data(self.psi, count, x1, x3, n1, n3, a_ho)
                 cur_phase = self._extract_phase()
+                gpe.save_figure_phase(cur_phase, count)
                 if self.write_velocity:
                     gpe.write_velocity2D(cur_phase, count, x1, x3, n1, n2, n3, a_ho, p_grid)
                 rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
@@ -204,16 +202,13 @@ class BEC:
                 
                 count += 1
                 self.logger.write(f"t = {t/omega_ho}\n")
-                if count%40==0:
-                # create the video in the current folder
-                    utils.video_creation.create_video(count=count,\
-                        simulation_name=SimulationName,\
-                        n1=n1,n3=n3
-                        )
-                    if self.write_velocity:
-                        utils.video_creation.create_velocity_video(count,\
-                                                               SimulationName,\
-                                                               n1,n3)
+            
+            # Perform the initial imprint
+            if (iteration%((kmax//shots)*initial_imprint_time) == 0) and (not initial_imprint_occured) and iteration > 0:
+                # imprint the topological excitation for the first time
+                self.logger.write(f"[INFO]: {self.time()} -- Imprinting the initial topological object\n")
+                self._imprint_vortices(vortices)
+                initial_imprint_occured = True
 
             # Repetitive imprinting
             if repetitive and (iteration%((kmax//shots)*imprintTime) == 0) and (num_imprints < max_imprints) and (count>wait):

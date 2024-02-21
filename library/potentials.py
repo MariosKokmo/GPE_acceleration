@@ -6,13 +6,13 @@ import torch
 ###############################################################################
 def select_potential(potentialType, app, **simulation_parameters):
    potentialType = potentialType.strip().lower()
-   available_potentials = {
-      "harmonic" : HarmonicPot(app, **simulation_parameters),
-      "constant" : ConstPot(app, **simulation_parameters),
-      "ramp" : RampPot(app, **simulation_parameters),
-      "rampharmonic" : RampHarmonicPot(app, **simulation_parameters),
-      "custom" : CustomPot(app, **simulation_parameters),
-   }
+   # available_potentials = {
+   #    "harmonic" : HarmonicPot(app, **simulation_parameters),
+   #    "constant" : ConstPot(app, **simulation_parameters),
+   #    "ramp" : RampPot(app, **simulation_parameters),
+   #    "rampharmonic" : RampHarmonicPot(app, **simulation_parameters),
+   #    "custom" : CustomPot(app, **simulation_parameters),
+   # }
    if potentialType == "harmonic":
       return HarmonicPot(app, **simulation_parameters)
    elif potentialType == "constant":

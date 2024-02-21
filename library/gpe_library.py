@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import math
 import numpy as np
 import torch
 import pandas as pd
@@ -487,3 +486,15 @@ def write_velocity2D(phase, count, x1, x3, n1, n2, n3, a_ho, p_grid):
                 third = velocity_mag[i,j,k]
                 fourth = veloc_phase[i,j,k]
                 f.write(f'{first},{second},{third},{fourth}\n')
+
+def save_figure_phase(phase, frame):
+    """Saves a figure of the phase"""
+    n1, n2, n3 = phase.shape
+    if phase.dtype == torch.cdouble:
+      plt.imshow((phase[:,n2//2,:].cpu().real),cmap='jet')
+    else:
+      plt.imshow((phase[:,n2//2,:].cpu()),cmap='jet')
+    cb = plt.colorbar() 
+    plt.title(f"Phase t = {frame}")
+    plt.savefig(f"phase_t_{frame}.png")
+    cb.remove() 
