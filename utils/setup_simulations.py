@@ -83,11 +83,12 @@ def _simulations_repetitive(parameters_list):
     imprinting_charge = parameters["imprinting_charge"]
     max_imprints = parameters["max_imprints"]
     imprint_every = parameters["imprint_every"]
+    imprint_times = "_".join([str(time) for time in parameters["imprint_times"]])
     if isinstance(charges, list):
         numberCharges = len(charges)
     else:
         numberCharges = 1
-    simulation_name = f'{numberCharges}vortex__initCharge{charges}__imprintCharge{imprinting_charge}__total_imprints{max_imprints}__every{imprint_every}_fps10'
+    simulation_name = f'{numberCharges}vortex__initCharge{charges}__imprintCharge{imprinting_charge}__total_imprints{max_imprints}__times{imprint_times}_fps10'
     simulations.append([simulation_name, parameters])
     print("creating folder: ", simulation_name)
     if not os.path.isdir(simulation_name):
