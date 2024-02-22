@@ -1,6 +1,7 @@
 """Provides the BCE class"""
 import library.gpe_library as gpe
 import library.ground_state as gs
+import library.read_write_utils as rw
 import utils.video_creation
 import numpy as np
 import os
@@ -87,8 +88,8 @@ class BEC:
         assert self.system.space_axes, self.logger.write(f"[FATAL]: {self.time()}-- the system has no axes initialised")
         x1, x2, x3 = self.system.space_axes
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
-        phase = self._extract_phase()
-        new_phase = gpe.imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, self.device)
+        
+        new_phase = gpe.create_vortices(vortices, x1, x2, x3, n1, n2, n3, self.device)
         return new_phase
     
     def _imprint_vortices(self, vortices):
@@ -96,28 +97,22 @@ class BEC:
         Imprints the initial vortices.
         Updates the wavefunction.
         """
-        new_phase = self._create_vortices(vortices)
-        self.psi = gpe.update_phase(self.psi, new_phase)
+        vortex_phase = self._create_vortices(vortices)
+        self.psi = gpe.update_phase(self.psi, vortex_phase)
 
     def _calculate_repetitive_phase(self, imprinting_vortices):
         """
         Creates the phase to be added at each repetitive step.
         """
-        x1, x2, x3 = self.system.space_axes
-        n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
-        self.repetitive_phase = gpe.create_additive_phase(imprinting_vortices, x1, x2, x3, n1, n2, n3, self.device)
+        self.repetitive_phase = self._create_vortices(imprinting_vortices)
 
     def _repetitive_imprint(self):
         """
         Performs the repetitive imprint.
         This could be any imprint after the initial one.
         """
-        # extract current phase of psi1
-        cur_phase = self._extract_phase()
-        # add the new vortices (init_phase)
-        new_phase = gpe.add_phase(cur_phase, self.repetitive_phase)
         # update the phase of the wavefunction
-        self.psi = gpe.update_phase(self.psi, new_phase)
+        self.psi = gpe.update_phase(self.psi, self.repetitive_phase)
         
     def evolve(self):
         # get the parameters for easy access
@@ -192,12 +187,12 @@ class BEC:
             # write data file
             if (iteration%(kmax/shots) == 0):
                 # Write some data
-                gpe.write_data(self.psi, count, x1, x3, n1, n3, a_ho)
+                rw.write_data(self.psi, count, x1, x3, n1, n3, a_ho)
                 cur_phase = self._extract_phase()
-                gpe.save_figure_phase(cur_phase, count)
+                rw.save_figure_phase(cur_phase, count)
                 if self.write_velocity:
-                    gpe.write_velocity2D(cur_phase, count, x1, x3, n1, n2, n3, a_ho, p_grid)
-                rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
+                    rw.write_velocity2D(cur_phase, count, x1, x3, n1, n2, n3, a_ho, p_grid)
+                rms = rw.rms_radius(self.psi, self.system.center, self.system.space_grid)
                 rms_measurements[count] = rms
                 
                 count += 1
@@ -224,7 +219,7 @@ class BEC:
         
 
         # Write the RMS measurements in a file
-        gpe.write_rms(rms_measurements, SimulationName)
+        rw.write_rms(rms_measurements, SimulationName)
 
         # create the full video
         utils.video_creation.create_video(count=count,\

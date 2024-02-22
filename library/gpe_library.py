@@ -1,56 +1,7 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 import torch
-import pandas as pd
-import matplotlib.pyplot as plt
-
-
-###############################################################################
-###############   CONSTANTS DO NOT CHANGE UNLESS REQUIRED #####################
-###############################################################################
-class CONSTANTS():
-  pi = 3.141592653589793238
-  elec=1.60217653e-19
-  hbar= 1.054572e-34            # J*s
-  amu= 1.66053873e-27           # Kg (atomic mass unit)
-  a_bohr= 0.5291772083e-10      # m
-  m1=87*amu                 # Rubidium mass Kg
-  m2=41*amu                 # Calcium mass Kg
-  mass_ratio=m1/m2
-  g=9.81
-  ascat = 99*a_bohr	# scattering length
-  nat = 5e+4		# number of atoms
-
-##############################################################################
-##############    UTILITY FUNCTIONS    #######################################
-##############################################################################
-
-def read_ground_state(data, n1, n2, n3):
-    """
-    Loads the ground state from a text file into a torch.tensor.
-
-    Parameters
-    ----------
-    data : .dat file
-        Contains the ground state of the GPE
-        as has been calculated for the specific potential.
-
-    Returns
-    -------
-    data as a numpy matrix.
-
-    """
-    matrix = pd.read_csv(data, header=None, names=['modulus', 'phase'])
-    matrix.modulus = matrix.modulus.str.strip(' (')
-    matrix.phase = matrix.phase.str.strip(' )')
-    matrix = matrix.astype(np.float64)
-
-    psi1 = matrix.iloc[:,0] + matrix.iloc[:,1]*1j
-    psi1 = psi1.values
-    psi1 = psi1.reshape((n1,n2,n3))
-    psi1 = torch.from_numpy(psi1)
-
-    return psi1
+from .parameters import CONSTANTS
 
 def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     """
@@ -100,10 +51,10 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     space_grid = (g_x.to(device=device), g_y.to(device=device), g_z.to(device=device))
     return x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid
 
-def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):
+def create_vortices(vortices, x1, x2, x3, n1, n2, n3, device):
     """
-    Creates the vortices on the condensate by modifying the phase of the
-    ground state. The vortices are on the xz (n1,n3) plane.
+    Creates the vortices on the condensate by calculating a new phase
+    to be added. The vortices are on the xz (n1,n3) plane.
     Note that the vortices are not yet imprinted, a 
     phase update needs to occur through the `update_phase` function
 
@@ -124,7 +75,7 @@ def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):
     if vortices is None:
       return
     number_of_vortices = vortices.shape[1]
-
+    phase = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
     for n in range(number_of_vortices):
         vx = vortices[0][n]
         vz = vortices[1][n]
@@ -141,36 +92,6 @@ def imprint_vortices(vortices, phase, x1, x2, x3, n1, n2, n3, device):
 
     phase[phase.isnan()] = 0+0j
     return phase
-
-def create_additive_phase(vortices, x1, x2, x3, n1, n2, n3, device):
-    """
-    Creates the additive repetitive imprinting phase to be stored and used.
-    Creates the phase in 2D on the x1-x3 plane.
-    Returns:
-    --------
-      torch.Tensor, the repetitive imprinting phase
-    """
-    if vortices is None:
-      return
-    number_of_vortices = vortices.shape[1]
-    repetive_phase = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
-    for n in range(number_of_vortices):
-        vx = vortices[0][n]
-        vz = vortices[1][n]
-        q = vortices[2][n]
-        for i in range(n3):
-          for k in range(n1):
-            if ((i != (vz + n3//2)) or (k >= (vx + n1//2))):
-              y = x3[i]-x3[vz+n3//2]
-              t = x1[k]-x1[vx+n1//2]
-              x = torch.sqrt(t**2 + y**2) + t
-              repetive_phase[k,:,i] += 2 * q * torch.atan2(y, x)
-            else:
-              repetive_phase[k,:,i] += q*CONSTANTS.pi
-
-    repetive_phase[repetive_phase.isnan()] = 0+0j
-    return repetive_phase
-
 
 def x_evolution(psi1, utot1, dtau, factor=0.5):
     """
@@ -226,7 +147,6 @@ def normalize(phi, d_x):
     phi = phi/torch.sqrt(d_x * torch.sum(torch.abs(phi)**2))
     return phi
 
-
 def update_phase(psi1, phase):
   """
     Updates the phase of the wavefunction.
@@ -241,32 +161,6 @@ def update_phase(psi1, phase):
   """
   psi1 = psi1 * torch.exp(phase*1j)
   return psi1
-
-def write_psi(file_name, psi, n1, n2, n3):
-    """
-    Writes the wavefunction of the condensate to a file.
-    Uaually used for the ground state.
-
-    Args:
-      file_name: str, the name of the file to be created
-      psi: torch.Tensor, the wavefunction of the condensate
-      n1, n2, n3: integer, the grid points in the 3 dimensions
-    """
-    with open(file_name, 'w') as f:
-        for i in range(n1):
-            for j in range(n2):
-              for k in range(n3):
-                 f.write(f'({psi[i,j,k].real},{psi[i,j,k].imag})\n')
-
-def write_data(psi1, count, x1, x3, n1, n3, a_ho):
-    file_name = f'R-{count:003}-cd.dat'
-    with open(file_name, 'w') as f:
-        for i in range(n1):
-            for k in range(n3):
-                first = x1[i] * a_ho * 1e6 # x position
-                second = x3[k] * a_ho * 1e6 # z position
-                third = torch.sum(torch.abs(psi1[i,:,k])**2) # column density
-                f.write(f'{first},{second},{third}\n')
 
 def extract_phase(psi):
     """
@@ -304,7 +198,7 @@ def add_phase(cur_phase, added_phase):
     final_phase = cur_phase + added_phase
     return final_phase
 
-def repetitive_imprint(psi1, repetitive_phase, n1, n2, n3):
+def repetitive_imprint(psi1, repetitive_phase):
     """
     Performs a re-imprint on the wavefunction. Adds the `repetitive_phase`.
     
@@ -317,12 +211,8 @@ def repetitive_imprint(psi1, repetitive_phase, n1, n2, n3):
     --------
       torch.tensor, the updated wavefunction
     """
-    # extract current phase of psi1
-    cur_phase = extract_phase(psi1)
-    # add the new vortices (init_phase)
-    new_phase = add_phase(cur_phase, repetitive_phase)
     # update the phase
-    psi1 = update_phase(psi1, new_phase, n1, n2, n3)
+    psi1 = update_phase(psi1, repetitive_phase)
     return psi1
 
 def split_step_step(psi1: torch.Tensor,\
@@ -376,21 +266,6 @@ def calculate_velocity2D(phase2D, p_grid):
     grad_angle = torch.atan2(grad_y, grad_x)
     return grad_mod, grad_angle
 
-def write_phase(phase, count, x1, x2, x3, n1, n2, n3, a_ho):
-    """
-    Writes the 3D phase in a file.
-    """
-    file_name = f'P-{count:003}-cd.dat'
-    with open(file_name, 'w') as f:
-        for i in range(n1):
-            for j in range(n2):
-                for k in range(n3):
-                    first = x1[i] * a_ho * 1e6 # x position
-                    second = x2[j] * a_ho * 1e6 # y position
-                    third = x3[k] * a_ho * 1e6 # z position
-                    fourth = phase[i,j,k]
-                    f.write(f'{first},{second},{third},{fourth}\n')
-
 def rms_radius(psi, center, space_grid):
     """
     Calculates the RMS radius of the condensate.
@@ -416,85 +291,3 @@ def rms_radius(psi, center, space_grid):
     d_sq = (g_x-center_x)**2 + (g_y-center_y)**2 + (g_z-center_z)**2
     rms = (torch.sum(d_sq * (torch.abs(psi)**2))/(N_tot))**0.5
     return rms
-
-def write_rms(rms_meas, SimulationName):
-  """
-  writes the RMS radius measurements for the BEC
-  in a default file 'rms_meas.txt'
-  """
-  with open(f'{SimulationName}_RMS_meas.txt', 'w') as f:
-    f.write("t\tr\n")
-    for t, r in rms_meas.items():
-      f.write(f"{t}\t{r}\n")
-
-def write_phase2D(phase, count, x1, x3, n1, n2, n3, a_ho):
-    """
-    Writes the 2D phase in a file.
-    It assumes the plane is the n1-n3
-    and the central cross-section i.e. n2 is at its midpoint
-    """
-    j = n2//2
-    file_name = f'P-{count:003}-cd.dat'
-    with open(file_name, 'w') as f:
-        for i in range(n1):
-            for k in range(n3):
-                first = x1[i] * a_ho * 1e6 # x position
-                third = x3[k] * a_ho * 1e6 # z position
-                fourth = phase[i,j,k]
-                f.write(f'{first},{third},{fourth}\n')
-
-def read_phase_file_2D(filename, n1, n3):
-    """
-    Reads a file that stores the phase of a 2D cross-section.
-    It returns the phase as a tensor reshaped as n1 x n3.
-    """
-    phase = pd.read_csv(filename, header=None, names=['x1', 'x2', 'phase'])
-    phase = phase.astype(np.float64)
-    phase = phase.values
-    phase = phase.reshape((n1, n3))
-    phase = torch.from_numpy(phase)
-    return phase
-
-def write_velocity2D(phase, count, x1, x3, n1, n2, n3, a_ho, p_grid):
-    """
-    Writes the 2D velocity in a file.
-    It assumes the plane is the n1-n3.
-    The format of the file is `x1, x3, velocity magnitude, velocity phase`
-
-    Args:
-    -----
-    phase: torch.Tensor, the 2D phase. Phase of a section
-    count: int, the snapshot number
-    x1, x3: torch.Tensor, the axes
-    n1, n3: int, the grid resolution along x1 and x3
-    a_ho: float, the harmonic oscillator length
-    p_grid: Tuple[torch.Tensor], a tuple of tensors that stores
-      the meshgrid of the momentum.
-
-    Returns:
-    --------
-    None 
-    """
-    j = n2//2
-    vel_file_name = f'V-{count:003}-cd.dat'
-    velocity_mag, veloc_phase = calculate_velocity2D(phase, p_grid)
-    with open(vel_file_name, 'w') as f:
-        for i in range(n1):
-            for k in range(n3):
-                first = x1[i] * a_ho * 1e6 # x position
-                second = x3[k] * a_ho * 1e6 # z position
-                third = velocity_mag[i,j,k]
-                fourth = veloc_phase[i,j,k]
-                f.write(f'{first},{second},{third},{fourth}\n')
-
-def save_figure_phase(phase, frame):
-    """Saves a figure of the phase"""
-    n1, n2, n3 = phase.shape
-    if phase.dtype == torch.cdouble:
-      plt.imshow((phase[:,n2//2,:].cpu().real),cmap='jet')
-    else:
-      plt.imshow((phase[:,n2//2,:].cpu()),cmap='jet')
-    cb = plt.colorbar() 
-    plt.title(f"Phase t = {frame}")
-    plt.savefig(f"phase_t_{frame}.png")
-    cb.remove() 

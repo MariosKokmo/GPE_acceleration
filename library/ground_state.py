@@ -1,7 +1,9 @@
 """Module to find the ground state numerically using the imaginary time
 propagation method. """
+import numpy as np
+import pandas as pd
 import torch
-from .gpe_library import normalize, write_psi, init_grid, write_data
+from .gpe_library import normalize, write_psi, init_grid
 from .gpe_library import CONSTANTS
 
 
@@ -108,3 +110,31 @@ def steepest_descent(psi, dtau, p_sq, uext, d_x, u):
     psi = normalize(psi, d_x)
     
     return psi, energy, tol, mu
+
+
+def read_ground_state(data, n1, n2, n3):
+    """
+    Loads the ground state from a text file into a torch.tensor.
+
+    Parameters
+    ----------
+    data : .dat file
+        Contains the ground state of the GPE
+        as has been calculated for the specific potential.
+
+    Returns
+    -------
+    data as a numpy matrix.
+
+    """
+    matrix = pd.read_csv(data, header=None, names=['modulus', 'phase'])
+    matrix.modulus = matrix.modulus.str.strip(' (')
+    matrix.phase = matrix.phase.str.strip(' )')
+    matrix = matrix.astype(np.float64)
+
+    psi1 = matrix.iloc[:,0] + matrix.iloc[:,1]*1j
+    psi1 = psi1.values
+    psi1 = psi1.reshape((n1,n2,n3))
+    psi1 = torch.from_numpy(psi1)
+
+    return psi1
