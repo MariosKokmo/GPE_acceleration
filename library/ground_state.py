@@ -3,8 +3,9 @@ propagation method. """
 import numpy as np
 import pandas as pd
 import torch
-from .gpe_library import normalize, write_psi, init_grid
+from .gpe_library import normalize, init_grid
 from .gpe_library import CONSTANTS
+from .read_write_utils import write_psi
 
 
 def find_ground_state(sim_params, system, file_name, device):

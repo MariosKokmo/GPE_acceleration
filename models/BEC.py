@@ -12,7 +12,7 @@ from sys import platform
 class BEC:
     def __init__(self, parameters, system, app, simulation_name):
         self.psi = None
-        self.write_velocity = app.write_velocity
+        self.app = app
         self.device = app.device
         self.logger = app.logger
         self.time = app.time
@@ -54,7 +54,7 @@ class BEC:
         self._find_ground_state()
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
         self.psi = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=self.device)
-        self.psi = gpe.read_ground_state(self.gs_path, n1, n2, n3)
+        self.psi = gs.read_ground_state(self.gs_path, n1, n2, n3)
         self.psi = self.psi.to(self.device)
     
     def _step(self, utot, dtau, p_sq, d_x):
@@ -170,7 +170,6 @@ class BEC:
 
         num_imprints = 0 # counts the additional imprints beyond the initial one
         count = 0
-        wait = 5
         initial_imprint_occured = False
         if repetitive:
             imprintTime = imprint_times[num_imprints]
@@ -190,23 +189,20 @@ class BEC:
                 rw.write_data(self.psi, count, x1, x3, n1, n3, a_ho)
                 cur_phase = self._extract_phase()
                 rw.save_figure_phase(cur_phase, count)
-                if self.write_velocity:
-                    rw.write_velocity2D(cur_phase, count, x1, x3, n1, n2, n3, a_ho, p_grid)
-                rms = rw.rms_radius(self.psi, self.system.center, self.system.space_grid)
+                rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
                 rms_measurements[count] = rms
-                
                 count += 1
                 self.logger.write(f"t = {t/omega_ho}\n")
             
             # Perform the initial imprint
-            if (iteration%((kmax//shots)*initial_imprint_time) == 0) and (not initial_imprint_occured) and iteration > 0:
+            if (iteration == ((kmax//shots)*initial_imprint_time)) and (not initial_imprint_occured):
                 # imprint the topological excitation for the first time
                 self.logger.write(f"[INFO]: {self.time()} -- Imprinting the initial topological object\n")
                 self._imprint_vortices(vortices)
                 initial_imprint_occured = True
 
             # Repetitive imprinting
-            if repetitive and (iteration%((kmax//shots)*imprintTime) == 0) and (num_imprints < max_imprints) and (count>wait):
+            if repetitive and (iteration == (kmax//shots)*imprintTime) and (num_imprints < max_imprints):
                 num_imprints += 1
                 if num_imprints < max_imprints:# to avoid out-of-bounds index
                     imprintTime = imprint_times[num_imprints]
@@ -226,8 +222,7 @@ class BEC:
                         simulation_name=SimulationName,\
                         n1=n1,n3=n3
                         )
-        if self.write_velocity:
+        if self.app.write_velocity:
             utils.video_creation.create_velocity_video(count,\
                                                     SimulationName,\
                                                     n1,n3)
-        
