@@ -175,7 +175,7 @@ class BEC:
             imprintTime = imprint_times[num_imprints]
             imprint_times_str = "_".join([str(time) for time in imprint_times])
             self.logger.write(f"[INFO]: {self.time()} -- Will imprint at the following times : {imprint_times_str}\n")
-            SimulationName=f'{len(vort_x)}vortex__initCharge{vort_charge[0]}__imprintCharge{imprinting_charge[0]}_total_imprints{max_imprints}__times{imprint_times_str}'
+            SimulationName=f'{len(vort_x)}vortex__initCharge{vort_charge[0]}__imprintCharge{imprinting_charge[0]}__times{imprint_times_str}'
         else:
             SimulationName=self.simulation_name
 
@@ -184,11 +184,12 @@ class BEC:
             utot = u*torch.abs(self.psi)**2 + uext # Total potential shape (n1,n2,n3)
 
             # write data file
-            if (iteration%(kmax/shots) == 0):
+            if (iteration%(kmax//shots) == 0):
                 # Write some data
                 rw.write_data(self.psi, count, x1, x3, n1, n3, a_ho)
-                cur_phase = self._extract_phase()
-                rw.save_figure_phase(cur_phase, count)
+                if self.app.phase_imaging:
+                    cur_phase = self._extract_phase()
+                    rw.save_figure_phase(cur_phase, count)
                 rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
                 rms_measurements[count] = rms
                 count += 1
@@ -204,7 +205,7 @@ class BEC:
             # Repetitive imprinting
             if repetitive and (iteration == (kmax//shots)*imprintTime) and (num_imprints < max_imprints):
                 num_imprints += 1
-                if num_imprints < max_imprints:# to avoid out-of-bounds index
+                if (num_imprints < max_imprints) and (num_imprints < len(imprint_times)):# to avoid out-of-bounds index
                     imprintTime = imprint_times[num_imprints]
                 print("Imprinting again...")
                 self.logger.write(f"[INFO]: {self.time()} -- Imprinting again...\n")
@@ -216,6 +217,7 @@ class BEC:
 
         # Write the RMS measurements in a file
         rw.write_rms(rms_measurements, SimulationName)
+        rw.save_rms_figure(f'{SimulationName}_RMS_meas.txt')
 
         # create the full video
         utils.video_creation.create_video(count=count,\

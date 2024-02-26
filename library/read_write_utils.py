@@ -128,3 +128,11 @@ def save_figure_phase(phase, frame):
     plt.title(f"Phase t = {frame}")
     plt.savefig(f"phase_t_{frame}.png")
     cb.remove()
+
+def save_rms_figure(title):
+    data = np.loadtxt(title, skiprows=1, delimiter="\t")
+    plt.plot(data[:,0],data[:,1])
+    plt.title(f"{title[:-4]}")
+    plt.ylabel("RMS")
+    plt.xlabel("time")
+    plt.savefig(f"RMS_{title[:-3]}.png")
