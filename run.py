@@ -24,6 +24,7 @@ def main():
     simulations.run_simulations()
     
     # close log file and exit
+    app.set_logger(logfile)
     app.open_logger()
     app.logger.write(f"[INFO]: {app.time()} -- Finished all simulations.\n")
     app.close_logger()

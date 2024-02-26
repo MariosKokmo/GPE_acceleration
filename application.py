@@ -7,6 +7,7 @@ class application:
         self.logger = None # the logger handler
         self.device = None
         self.write_velocity = False
+        self.phase_imaging = False
 
     def set_logger(self, logfile):
         self.logfile = logfile

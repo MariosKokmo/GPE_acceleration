@@ -88,13 +88,13 @@ def _simulations_repetitive(parameters_list):
         numberCharges = len(charges)
     else:
         numberCharges = 1
-    simulation_name = f'{numberCharges}vortex__initCharge{charges}__imprintCharge{imprinting_charge}__total_imprints{max_imprints}__times{imprint_times}_fps10'
+    simulation_name = f'{numberCharges}vort__initCharge{charges}__imprintCharge{imprinting_charge}__times{imprint_times}'
     simulations.append([simulation_name, parameters])
     print("creating folder: ", simulation_name)
     if not os.path.isdir(simulation_name):
        os.mkdir(simulation_name)
     else:
-      print(f"{simulation_name} folder already exists...skipping")
+      print(f"{simulation_name} folder already exists...data will be overwritten")
   return simulations
 
 def _simulations_multi_vortex(parameters_list):
@@ -126,7 +126,7 @@ def _simulations_multi_vortex(parameters_list):
       if not os.path.isdir(simulation_name):
         os.mkdir(simulation_name)
       else:
-        print(f"{simulation_name} folder already exists...skipping")
+        print(f"{simulation_name} folder already exists...data will be overwritten")
     return simulations
 
 def get_simulation_parameters(ConfigFilePath):
@@ -177,7 +177,7 @@ def get_simulation_parameters(ConfigFilePath):
   max_imprints = sim_params["max_imprints"]
 
   if repetitive and (len(imprint_every) != len(imprint_times)):
-      msg = "FATAL. imprint_every and imprint_times have different number of simulations. Make sure you write an empty list [] when not using exact times."
+      msg = "[FATAL]. imprint_every and imprint_times have different number of simulations. Make sure you write an empty list [] when not using exact times."
       return None, msg
   
   if repetitive:

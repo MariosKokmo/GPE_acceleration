@@ -180,8 +180,7 @@ def extract_phase(psi):
 
 def add_phase(cur_phase, added_phase):
     """
-    Adds an extra phase to our current phase. This is the effect of imprinting
-    additional vortices in the current condensate.
+    Adds an extra phase to the current phase. 
 
     Parameters
     ----------
