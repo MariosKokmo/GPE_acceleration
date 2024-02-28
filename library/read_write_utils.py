@@ -131,6 +131,7 @@ def save_figure_phase(phase, frame):
 
 def save_rms_figure(title):
     data = np.loadtxt(title, skiprows=1, delimiter="\t")
+    plt.figure()
     plt.plot(data[:,0],data[:,1])
     plt.title(f"{title[:-4]}")
     plt.ylabel("RMS")
