@@ -19,6 +19,19 @@ def _read_configuration_file(ConfigFile):
     simulations = json.load(f)
   return simulations
 
+def get_application_config(ConfigFile="appConfig.json"):
+  """Reads the app configuration file
+  
+  Args: str, the path to the file
+  Returns: dictionary, the contents of the configuration file
+  """
+  cwd = os.getcwd()
+  print(cwd)
+  pathConfigFile = cwd + "/" + ConfigFile
+  with open(pathConfigFile, 'r') as f:
+    appconfigs = json.load(f)
+  return appconfigs
+
 def get_simulation_combinations(sims):
   """
   Creates the distinct simulations to be run.
@@ -350,6 +363,6 @@ def _perform_reimprint_checks(simulation_params):
       # check that the maximum imprint time is less than simulation time
       # imprint times are given in ms
           if max(times)/1000 > sim_time:
-              msg = f"The maximum imprint time is greater than the total simulation time for simulation {index+1}"
+              msg = f"The maximum imprint time is greater than the total simulation time for simulation {index+1}\n"
               return True, msg
   return True, ""

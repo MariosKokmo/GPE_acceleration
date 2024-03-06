@@ -38,14 +38,14 @@ class System:
         if fault:
             self.logger.write("[FATAL]: {} -- {}".format(self.time(), fault))
             self.app.close_logger()
-            raise Exception("there is an error in the configuration file")
+            raise Exception("there is an error in the configuration file. See Log.")
         # define the external potential
         potentialType = self.simulation_parameters["Potential_type"]
         new_potential = select_potential(potentialType, self.app, **self.simulation_parameters)
         if not new_potential:
             self.logger.write("[FATAL]: {} -- Potential was not selected".format(self.time()))
             self.app.close_logger()
-            raise Exception("there is an error in the configuration file")
+            raise Exception("there is an error in the configuration file. See log.")
         
         self.uext = new_potential
         self.logger.write("[INFO]: {} -- Potential on device {}\n".format(self.time(), self.uext.potential.device))

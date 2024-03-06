@@ -6,10 +6,9 @@ from models.simulation import Simulations
 def main():
     # Set up the application
     app = application.application()
-    logfile = "log.txt"
-    app.set_logger(logfile)
     DEVICE = torch.device('cuda') if torch.cuda.is_available() else 'cpu'
     app.set_device(DEVICE)
+
     app.open_logger()
     app.logger.write(f"[INFO]: {app.time()} -- Running on {DEVICE}.\n")
     app.close_logger()
@@ -24,7 +23,7 @@ def main():
     simulations.run_simulations()
     
     # close log file and exit
-    app.set_logger(logfile)
+    app.reset_logger()
     app.open_logger()
     app.logger.write(f"[INFO]: {app.time()} -- Finished all simulations.\n")
     app.close_logger()
