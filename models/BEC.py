@@ -269,7 +269,7 @@ class BEC:
                 key_for_phase = (x,y,charge)
                 phaseImp = self.all_phases[key_for_phase]
                 print("Imprinting again...")
-                self.logger.write(f"[INFO]: {self.time()} -- Imprinting again...\n")
+                self.logger.write(f"[INFO]: {self.time()} -- Imprinting again...{key_for_phase}\n")
                 self._repetitive_imprint(phaseImp)
                 num_imprints += 1
                 if (num_imprints < max_imprints) and (num_imprints < len(imprint_times)):# to avoid out-of-bounds index
