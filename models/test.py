@@ -18,39 +18,57 @@ def _create_vortex_list(imprint_position_x, imprint_position_y, imprinting_charg
     """
     assert len(imprint_position_x) == len(imprint_position_y)
     assert len(imprint_position_x) == len(imprinting_charge)
-    vortex_list_all_iterations = []
-    for idx, _ in enumerate(imprint_times):
+    vortex_list_all_iterations = {}
+    
+    imprint_times = imprint_times[0]
+    imprint_position_x = imprint_position_x[0]
+    imprint_position_y = imprint_position_y[0]
+    imprinting_charge = imprinting_charge[0]
+
+    for idx, time in enumerate(imprint_times):
         vort_x = imprint_position_x[idx]
         vort_y = imprint_position_y[idx]
         vort_charge = imprinting_charge[idx]
         vort = np.vstack((vort_x, vort_y, vort_charge))
-        vort = np.expand_dims(vort, axis = 0)
-        vortex_list_all_iterations.append(vort)
-    return np.concatenate(vortex_list_all_iterations, axis=0)
+        vortex_list_all_iterations[time] = vort
+        
+    return vortex_list_all_iterations
 
 def _calculate_all_phases(imprinting_vortices):
-        """
-        Calculates a special phase. This could be a huge anti-charge etc.
+    """
+    Calculates a special phase. This could be a huge anti-charge etc.
 
-        Input:
-            imprinting_vortices: np.array, shape=(no. imprints, 3, no.vortices)
-            each element is a collection
-            of vortex positions along with their charges
+    Input:
+        imprinting_vortices: np.array, shape=(no. imprints, 3, no.vortices)
+        each element is a collection
+        of vortex positions along with their charges
 
-        """
-        for _, imprint in enumerate(imprinting_vortices):
-            x = tuple(imprint[0])
-            y = tuple(imprint[1])
-            charge = tuple(imprint[2])
-            key = (x,y,charge)
-            print(str(key))
+    """
+    for _, value in imprinting_vortices.items():
+        x = tuple(value[0])
+        y = tuple(value[1])
+        charge = tuple(value[2])
+        key = (x,y,charge)
+        print(str(key))
 
-imprint_position_x = np.array([[0],[0],[0]])
-imprint_position_y = np.array([[0],[0],[0]])
-imprinting_charge = np.array([[1],[1],[1]])
-imprint_times = np.array([7,10,15])
+imprint_position_x = np.array([[[0],[0],[0]]])
+imprint_position_y = np.array([[[0],[0],[0]]])
+imprinting_charge = np.array([[[1],[1],[1]]])
+imprint_times = np.array([[7,10,15]])
 
 vortex_array = _create_vortex_list(imprint_position_x, imprint_position_y, imprinting_charge, imprint_times)
 print(vortex_array)
 
 _calculate_all_phases(vortex_array)
+
+imprint_position_x = np.array([[[0,0],[0]]])
+imprint_position_y = np.array([[[0,0],[0]]])
+imprinting_charge = np.array([[[1,2],[1]]])
+imprint_times = np.array([[7,9]])
+
+vortex_array = _create_vortex_list(imprint_position_x, imprint_position_y, imprinting_charge, imprint_times)
+print(vortex_array)
+
+_calculate_all_phases(vortex_array)
+
+print(f"{imprint_times}")

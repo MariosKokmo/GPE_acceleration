@@ -117,7 +117,7 @@ class BEC:
             of vortex positions along with their charges
 
         """
-        for _, imprint in enumerate(imprinting_vortices):
+        for _, imprint in imprinting_vortices.items():
             x = tuple(imprint[0])
             y = tuple(imprint[1])
             charge = tuple(imprint[2])
@@ -147,15 +147,20 @@ class BEC:
         """
         assert len(imprint_position_x) == len(imprint_position_y)
         assert len(imprint_position_x) == len(imprinting_charge)
-        vortex_list_all_iterations = []
-        for idx, _ in enumerate(imprint_times):
+        vortex_list_all_iterations = {}
+        
+        imprint_position_x = imprint_position_x[0]
+        imprint_position_y = imprint_position_y[0]
+        imprinting_charge = imprinting_charge[0]
+
+        for idx, time in enumerate(imprint_times):
             vort_x = imprint_position_x[idx]
             vort_y = imprint_position_y[idx]
             vort_charge = imprinting_charge[idx]
             vort = np.vstack((vort_x, vort_y, vort_charge))
-            vort = np.expand_dims(vort, axis = 0)
-            vortex_list_all_iterations.append(vort)
-        return np.concatenate(vortex_list_all_iterations, axis=0)
+            vortex_list_all_iterations[time] = vort
+            
+        return vortex_list_all_iterations
 
     def _repetitive_imprint(self, phase):
         """
@@ -198,21 +203,20 @@ class BEC:
             vortices = np.vstack((vort_x, vort_y, vort_charge))
             initial_imprint_time = self.parameters["initial_imprint_time"]
             if repetitive:
-                imprinting_charge = np.array(imprinting_charge)
+                imprinting_charge = np.array([imprinting_charge], dtype=object)
                 imprint_times = self.parameters["imprint_times"]
                 imprint_position_x = self.parameters["imprint_position_x"]
                 imprint_position_y = self.parameters["imprint_position_y"]
-                imprint_position_x = np.array(imprint_position_x)
-                imprint_position_y = np.array(imprint_position_y)
-                imprinting_vortices = self._create_vortex_list(imprint_position_x, imprint_position_y, imprinting_charge, imprint_times)
-                print(imprinting_vortices)
+                imprint_position_x = np.array([imprint_position_x], dtype=object)
+                imprint_position_y = np.array([imprint_position_y], dtype=object)
+                imprinting_vortices_dictionary = self._create_vortex_list(imprint_position_x, imprint_position_y, imprinting_charge, imprint_times)
 
         # initialise the BEC on the ground state
         self._initialise()
 
         if repetitive:
             # calculate the repetitive imprinting phase
-            self._calculate_all_phases(imprinting_vortices)
+            self._calculate_all_phases(imprinting_vortices_dictionary)
         
         # evolve the BEC and perform re-imprint
         ##############################################################################
@@ -226,9 +230,10 @@ class BEC:
             imprintTime = imprint_times[num_imprints]
             imprint_times_str = "_".join([str(time) for time in imprint_times])
             vortices_to_imprint = "_".join([str(key) for key in self.all_phases.keys()])
+            imprinting_charge_str = "_".join([str(charge) for charge in imprinting_charge]).replace("\n","_")
             self.logger.write(f"[INFO]: {self.time()} -- Will imprint at the following times : {imprint_times_str}\n")
             self.logger.write(f"[INFO]: {self.time()} -- Will imprint the following (x,y,charges) : {vortices_to_imprint}\n")
-            SimulationName=f'{len(vort_x)}vortex__initCharge{vort_charge[0]}__imprintCharge{imprinting_charge[0]}__times{imprint_times_str}'
+            SimulationName=f'{len(vort_x)}vortex__initCharge{vort_charge[0]}__imprintCharge{imprinting_charge_str}__times{imprint_times_str}'
         else:
             SimulationName=self.simulation_name
 
@@ -257,7 +262,7 @@ class BEC:
 
             # repetitive imprinting with possibly different phases
             if repetitive and (iteration == (kmax//shots)*imprintTime) and (num_imprints < max_imprints):
-                vortex_array = imprinting_vortices[num_imprints]
+                vortex_array = imprinting_vortices_dictionary[imprintTime]
                 x = tuple(vortex_array[0])
                 y = tuple(vortex_array[1])
                 charge = tuple(vortex_array[2])
