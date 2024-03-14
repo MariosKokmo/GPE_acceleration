@@ -237,6 +237,9 @@ class BEC:
         else:
             SimulationName=self.simulation_name
 
+        # create storage for the line cross sections
+        cross_line = torch.zeros(shots, n1)
+
         for iteration in range(kmax):
             t = dt*iteration*omega_ho
             utot = u*torch.abs(self.psi)**2 + uext # Total potential shape (n1,n2,n3)
@@ -250,6 +253,9 @@ class BEC:
                     rw.save_figure_phase(cur_phase, count)
                 rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
                 rms_measurements[count] = rms
+
+                cross_line[count,:] = gpe.calculate_cross_section_line(self.psi)
+
                 count += 1
                 self.logger.write(f"t = {t/omega_ho}\n")
             
@@ -282,6 +288,9 @@ class BEC:
         # Write the RMS measurements in a file
         rw.write_rms(rms_measurements, SimulationName)
         rw.save_rms_figure(f'{SimulationName}_RMS_meas.txt')
+
+        # save the cross sections
+        rw.save_cross_section_line_figure(cross_line)
 
         # create the full video
         utils.video_creation.create_video(count=count,\

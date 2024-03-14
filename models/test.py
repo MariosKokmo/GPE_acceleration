@@ -1,4 +1,6 @@
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 
 def _create_vortex_list(imprint_position_x, imprint_position_y, imprinting_charge, imprint_times):
     """
