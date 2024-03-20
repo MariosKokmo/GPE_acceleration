@@ -21,6 +21,7 @@ class BEC:
         self.system = system
         self.gs_path = None
         self.repetitive_phase = None
+        self.all_phases = {}
 
     def _find_ground_state(self):
         """
@@ -106,13 +107,68 @@ class BEC:
         """
         self.repetitive_phase = self._create_vortices(imprinting_vortices)
 
-    def _repetitive_imprint(self):
+    def _calculate_all_phases(self, imprinting_vortices):
+        """
+        Calculates a special phase. This could be a huge anti-charge etc.
+
+        Input:
+            imprinting_vortices: np.array, shape=(no. imprints, 3, no.vortices)
+            each element is a collection
+            of vortex positions along with their charges
+
+        """
+        for _, imprint in imprinting_vortices.items():
+            x = tuple(imprint[0])
+            y = tuple(imprint[1])
+            charge = tuple(imprint[2])
+            key = (x,y,charge)
+            if key in self.all_phases.keys():
+                self.logger.write(f"[INFO]: {self.time()} -- Phase for {key} already calculated.\n")
+                continue
+            else:
+                self.logger.write(f"[INFO]: {self.time()} -- Calculating phase for {key}...\n")
+                self.all_phases[key] = self._create_vortices(imprint)
+
+    def _create_vortex_list(self, imprint_position_x, imprint_position_y, imprinting_charge, imprint_times):
+        """
+        Takes as input 3 arrays. Each array is for one simulation and
+        can contain multiple sub-arrays. Each sub-array contains the vortex-related
+        parameters for a differetn imprint time.
+        
+        Returns:
+        --------
+            np.array, 3D numpy array. 3 x #of vortices x #of imprints
+        Example:
+        --------
+        imprinting_charge = [ [1,2], [3,4], [5,6] ]
+        There are 3 imprint times. In the first imprint we imprint 2 vortices
+        one with charge 1 and the other with charge 2. In the second imprint the
+        two vortices that are imprinted are of charge 3 and 4 respectively etc.
+        """
+        assert len(imprint_position_x) == len(imprint_position_y)
+        assert len(imprint_position_x) == len(imprinting_charge)
+        vortex_list_all_iterations = {}
+        
+        imprint_position_x = imprint_position_x[0]
+        imprint_position_y = imprint_position_y[0]
+        imprinting_charge = imprinting_charge[0]
+
+        for idx, time in enumerate(imprint_times):
+            vort_x = imprint_position_x[idx]
+            vort_y = imprint_position_y[idx]
+            vort_charge = imprinting_charge[idx]
+            vort = np.vstack((vort_x, vort_y, vort_charge))
+            vortex_list_all_iterations[time] = vort
+            
+        return vortex_list_all_iterations
+
+    def _repetitive_imprint(self, phase):
         """
         Performs the repetitive imprint.
         This could be any imprint after the initial one.
         """
         # update the phase of the wavefunction
-        self.psi = gpe.update_phase(self.psi, self.repetitive_phase)
+        self.psi = gpe.update_phase(self.psi, phase)
         
     def evolve(self):
         # get the parameters for easy access
@@ -147,21 +203,20 @@ class BEC:
             vortices = np.vstack((vort_x, vort_y, vort_charge))
             initial_imprint_time = self.parameters["initial_imprint_time"]
             if repetitive:
-                imprinting_charge = np.array([imprinting_charge])
+                imprinting_charge = np.array([imprinting_charge], dtype=object)
                 imprint_times = self.parameters["imprint_times"]
                 imprint_position_x = self.parameters["imprint_position_x"]
                 imprint_position_y = self.parameters["imprint_position_y"]
-                imprint_position_x = np.array([imprint_position_x])
-                imprint_position_y = np.array([imprint_position_y])
-                imprinting_vortices = np.vstack((imprint_position_x, imprint_position_y, imprinting_charge))
-            
+                imprint_position_x = np.array([imprint_position_x], dtype=object)
+                imprint_position_y = np.array([imprint_position_y], dtype=object)
+                imprinting_vortices_dictionary = self._create_vortex_list(imprint_position_x, imprint_position_y, imprinting_charge, imprint_times)
 
         # initialise the BEC on the ground state
         self._initialise()
 
         if repetitive:
             # calculate the repetitive imprinting phase
-            self._calculate_repetitive_phase(imprinting_vortices)
+            self._calculate_all_phases(imprinting_vortices_dictionary)
         
         # evolve the BEC and perform re-imprint
         ##############################################################################
@@ -171,13 +226,20 @@ class BEC:
         num_imprints = 0 # counts the additional imprints beyond the initial one
         count = 0
         initial_imprint_occured = False
+        shots_per_ms = shots // (self.system.simulation_parameters["Total_simulation_time"]*1000)
         if repetitive:
             imprintTime = imprint_times[num_imprints]
-            imprint_times_str = "_".join([str(time) for time in imprint_times])
+            imprint_times_str = "_".join([str(round(time / shots_per_ms,2)) for time in imprint_times])
+            vortices_to_imprint = "_".join([str(key) for key in self.all_phases.keys()])
+            imprinting_charge_str = "_".join([str(charge) for charge in imprinting_charge]).replace("\n","_")
             self.logger.write(f"[INFO]: {self.time()} -- Will imprint at the following times : {imprint_times_str}\n")
-            SimulationName=f'{len(vort_x)}vortex__initCharge{vort_charge[0]}__imprintCharge{imprinting_charge[0]}__times{imprint_times_str}'
+            self.logger.write(f"[INFO]: {self.time()} -- Will imprint the following (x,y,charges) : {vortices_to_imprint}\n")
+            SimulationName=f'{len(vort_x)}vortex__initCharge{vort_charge[0]}__imprintCharge{imprinting_charge_str}__times{imprint_times_str}'
         else:
             SimulationName=self.simulation_name
+
+        # create storage for the line cross sections
+        cross_line = torch.zeros(shots, n1)
 
         for iteration in range(kmax):
             t = dt*iteration*omega_ho
@@ -192,6 +254,9 @@ class BEC:
                     rw.save_figure_phase(cur_phase, count)
                 rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
                 rms_measurements[count] = rms
+
+                cross_line[count,:] = gpe.calculate_cross_section_line(self.psi)
+
                 count += 1
                 self.logger.write(f"t = {t/omega_ho}\n")
             
@@ -202,14 +267,21 @@ class BEC:
                 self._imprint_vortices(vortices)
                 initial_imprint_occured = True
 
-            # Repetitive imprinting
+            # repetitive imprinting with possibly different phases
             if repetitive and (iteration == (kmax//shots)*imprintTime) and (num_imprints < max_imprints):
+                vortex_array = imprinting_vortices_dictionary[imprintTime]
+                x = tuple(vortex_array[0])
+                y = tuple(vortex_array[1])
+                charge = tuple(vortex_array[2])
+                key_for_phase = (x,y,charge)
+                # extract the phase to imprint
+                phaseImp = self.all_phases[key_for_phase]
+                print("Imprinting again...")
+                self.logger.write(f"[INFO]: {self.time()} -- Imprinting again...{key_for_phase}\n")
+                self._repetitive_imprint(phaseImp)
                 num_imprints += 1
                 if (num_imprints < max_imprints) and (num_imprints < len(imprint_times)):# to avoid out-of-bounds index
                     imprintTime = imprint_times[num_imprints]
-                print("Imprinting again...")
-                self.logger.write(f"[INFO]: {self.time()} -- Imprinting again...\n")
-                self._repetitive_imprint()
 
             # split-step evolution
             self._step(utot, dtau, p_sq, d_x)
@@ -218,6 +290,10 @@ class BEC:
         # Write the RMS measurements in a file
         rw.write_rms(rms_measurements, SimulationName)
         rw.save_rms_figure(f'{SimulationName}_RMS_meas.txt')
+
+        # save the cross sections in figure and file
+        rw.save_cross_section_line_figure(cross_line)
+        rw.save_tensor_to_csv(cross_line, "cross_line_density.csv")
 
         # create the full video
         utils.video_creation.create_video(count=count,\

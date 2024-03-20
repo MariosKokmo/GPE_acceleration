@@ -290,3 +290,26 @@ def rms_radius(psi, center, space_grid):
     d_sq = (g_x-center_x)**2 + (g_y-center_y)**2 + (g_z-center_z)**2
     rms = (torch.sum(d_sq * (torch.abs(psi)**2))/(N_tot))**0.5
     return rms
+
+def calculate_cross_section_line(psi, axis=1):
+    """"
+    Calculates the density on a line that crosses the condensate.
+    Assuming the condensate on the x-z plane and centered, then the cross
+    section line would be with respect to one of the axis.
+
+    Args
+    ----
+    psi: torch.Tensor, the BEC wavefunction
+    axis: int, axis 1 means x and axis 2 means z, default is 1
+
+    Returns
+    -------
+    cross_line: torch.Tensor, the cross section line passing 
+                through the centre of the BEC
+    """
+    n1, n2, n3 = psi.shape
+    if axis == 1:
+        cross_line = torch.sum(torch.abs(psi[n1//2,:,:])**2, dim=0)
+    if axis == 2:
+        cross_line = torch.sum(torch.abs(psi[:,:,n3//2])**2, dim=0)
+    return cross_line

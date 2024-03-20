@@ -130,9 +130,42 @@ def save_figure_phase(phase, frame):
     cb.remove()
 
 def save_rms_figure(title):
+    """
+    Reads a file delimited by tabs with the first
+    column being the time and the second column being
+    the quantity of interest i.e. RMS value
+    """
     data = np.loadtxt(title, skiprows=1, delimiter="\t")
+    plt.figure()
     plt.plot(data[:,0],data[:,1])
     plt.title(f"{title[:-4]}")
     plt.ylabel("RMS")
     plt.xlabel("time")
     plt.savefig(f"RMS_{title[:-3]}.png")
+
+def save_cross_section_line_figure(cross_line_data):
+    """
+    Assumes data of shape (snapshots, position)
+    Data consists of rows where each row is a snapshot of the
+    density values across the section
+    """
+    shots, dim = cross_line_data.shape
+    ax = plt.figure(figsize=(12,16)).add_subplot(projection='3d')
+    x = np.arange(0, shots, 1)
+    y = np.arange(0, dim, 1)
+
+    # Plot a sin curve using the x and y axes.
+    for t in range(shots):
+        data = cross_line_data[t, :].numpy()
+        x = np.ones(dim)*t
+        ax.plot(x,y,data)
+    ax.set_xlabel('time')
+    ax.set_ylabel('space')
+    ax.set_zlabel('density')
+    plt.savefig(f"cross_section_line.png")
+
+
+def save_tensor_to_csv(tensor, filename):
+    tensor_np = tensor.numpy() #convert to Numpy array
+    df = pd.DataFrame(tensor_np) #convert to a dataframe
+    df.to_csv(filename,index=False, header=None) #save to file

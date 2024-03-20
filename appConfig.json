@@ -1,0 +1,5 @@
+{
+    "logfile":"log.txt",
+    "write_velocity":false,
+    "phase_imaging":false
+}
