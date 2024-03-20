@@ -150,7 +150,7 @@ def save_cross_section_line_figure(cross_line_data):
     density values across the section
     """
     shots, dim = cross_line_data.shape
-    ax = plt.figure().add_subplot(projection='3d')
+    ax = plt.figure(figsize=(12,16)).add_subplot(projection='3d')
     x = np.arange(0, shots, 1)
     y = np.arange(0, dim, 1)
 

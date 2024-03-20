@@ -226,9 +226,10 @@ class BEC:
         num_imprints = 0 # counts the additional imprints beyond the initial one
         count = 0
         initial_imprint_occured = False
+        shots_per_ms = shots // (self.system.simulation_parameters["Total_simulation_time"]*1000)
         if repetitive:
             imprintTime = imprint_times[num_imprints]
-            imprint_times_str = "_".join([str(time) for time in imprint_times])
+            imprint_times_str = "_".join([str(round(time / shots_per_ms),2) for time in imprint_times])
             vortices_to_imprint = "_".join([str(key) for key in self.all_phases.keys()])
             imprinting_charge_str = "_".join([str(charge) for charge in imprinting_charge]).replace("\n","_")
             self.logger.write(f"[INFO]: {self.time()} -- Will imprint at the following times : {imprint_times_str}\n")
@@ -273,6 +274,7 @@ class BEC:
                 y = tuple(vortex_array[1])
                 charge = tuple(vortex_array[2])
                 key_for_phase = (x,y,charge)
+                # extract the phase to imprint
                 phaseImp = self.all_phases[key_for_phase]
                 print("Imprinting again...")
                 self.logger.write(f"[INFO]: {self.time()} -- Imprinting again...{key_for_phase}\n")

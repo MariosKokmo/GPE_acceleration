@@ -101,7 +101,7 @@ def _simulations_repetitive(parameters_list):
         numberCharges = len(charges)
     else:
         numberCharges = 1
-    simulation_name = f'{numberCharges}vort__initCharge{charges}__imprintCharge{imprinting_charge}__times{imprint_times}'
+    simulation_name = f'{numberCharges}vort__initCharge{charges}__imprintCharge{imprinting_charge}__snapshots{imprint_times}'
     simulations.append([simulation_name, parameters])
     print("creating folder: ", simulation_name)
     if not os.path.isdir(simulation_name):
