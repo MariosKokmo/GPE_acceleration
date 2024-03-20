@@ -229,7 +229,7 @@ class BEC:
         shots_per_ms = shots // (self.system.simulation_parameters["Total_simulation_time"]*1000)
         if repetitive:
             imprintTime = imprint_times[num_imprints]
-            imprint_times_str = "_".join([str(round(time / shots_per_ms),2) for time in imprint_times])
+            imprint_times_str = "_".join([str(round(time / shots_per_ms,2)) for time in imprint_times])
             vortices_to_imprint = "_".join([str(key) for key in self.all_phases.keys()])
             imprinting_charge_str = "_".join([str(charge) for charge in imprinting_charge]).replace("\n","_")
             self.logger.write(f"[INFO]: {self.time()} -- Will imprint at the following times : {imprint_times_str}\n")
@@ -291,8 +291,9 @@ class BEC:
         rw.write_rms(rms_measurements, SimulationName)
         rw.save_rms_figure(f'{SimulationName}_RMS_meas.txt')
 
-        # save the cross sections
+        # save the cross sections in figure and file
         rw.save_cross_section_line_figure(cross_line)
+        rw.save_tensor_to_csv(cross_line, "cross_line_density.csv")
 
         # create the full video
         utils.video_creation.create_video(count=count,\

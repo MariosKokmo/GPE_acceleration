@@ -163,3 +163,9 @@ def save_cross_section_line_figure(cross_line_data):
     ax.set_ylabel('space')
     ax.set_zlabel('density')
     plt.savefig(f"cross_section_line.png")
+
+
+def save_tensor_to_csv(tensor, filename):
+    tensor_np = tensor.numpy() #convert to Numpy array
+    df = pd.DataFrame(tensor_np) #convert to a dataframe
+    df.to_csv(filename,index=False, header=None) #save to file
