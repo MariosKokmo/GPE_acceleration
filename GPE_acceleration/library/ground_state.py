@@ -10,13 +10,15 @@ from .read_write_utils import write_psi
 
 def find_ground_state(sim_params, system, file_name, device):
     """
-    Args:
+    Parameters
+    ----------
         sims_params: dictionary, holds the parameters
             for the specific simulation
         file_name: str, the name of the ground state file
         device: the device to run the code
 
-    Returns:
+    Returns
+    -------
         torch.Tensor, the ground state for the system
     """
     n1, n2, n3 = system.simulation_parameters["Grid_resolution"]
@@ -79,7 +81,8 @@ def steepest_descent(psi, dtau, p_sq, uext, d_x, u):
     """
     Calculates a step of the steepest descent algorithm.
 
-    Args:
+    Parameters
+    ----------
         psi: torch.Tensor, the wavefunction of the condensate.
              Transferred to GPU if available
         dtau:
@@ -88,7 +91,8 @@ def steepest_descent(psi, dtau, p_sq, uext, d_x, u):
         d_x:
         u: float, the interaction strength
     
-    Returns:
+    Returns
+    -------
     """
     dpsi = psi
     psiF = torch.fft.fftn(dpsi, norm='forward')

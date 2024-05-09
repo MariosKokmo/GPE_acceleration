@@ -8,8 +8,8 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     Initialises the grid for x and p spaces
     and the external potential
 
-    Args
-    ----
+    Parameters
+    ----------
     x_min:
     x_max:
     dx:
@@ -147,12 +147,17 @@ def p_evolution(psi1, dtau, p_sq):
 def normalize(phi, d_x):
     """
     Normalizes the wavefunction.
-    Args:
-    ----
+    
+    Parameters
+    ----------
     phi: torch.Tensor
         The wavefunction to be normalised
     d_x: int,
         The grid cell volume
+
+    Returns
+    -------
+     The normalized wavefunction
     """
     phi = phi/torch.sqrt(d_x * torch.sum(torch.abs(phi)**2))
     return phi
@@ -161,12 +166,13 @@ def update_phase(psi1, phase):
   """
     Updates the phase of the wavefunction.
     
-    Args:
-    -----
+    Parameters
+    ----------
       psi1 : torch.Tensor
       phase : torch.Tensor
-    Returns:
-    --------
+    
+    Returns
+    -------
       torch.Tensor, the updated wavefunction
   """
   psi1 = psi1 * torch.exp(phase*1j)
@@ -176,12 +182,12 @@ def extract_phase(psi):
     """
     Extracts the phase from the wave function.
 
-    Args:
-    -----
+    Parameters
+    ----------
     psi : torch.Tensor
       The wavefunction of the condensate.
     
-    Returns:
+    Returns
     -------
       torch.Tensor, the phase of the condensate
     """
@@ -211,13 +217,14 @@ def repetitive_imprint(psi1, repetitive_phase):
     """
     Performs a re-imprint on the wavefunction. Adds the `repetitive_phase`.
     
-    Args:
-    --------
+    Parameters
+    ----------
       psi1: torch.tensor, the wavefunction
       repetitive_phase:
       n1, n2, n3: int, the grid
-    Returns:
-    --------
+    
+    Returns
+    -------
       torch.tensor, the updated wavefunction
     """
     # update the phase
@@ -232,15 +239,16 @@ def split_step_step(psi1: torch.Tensor,\
     """
     Performs a step of the split-step Fourier transform.
 
-    Args:
-    -------
+    Parameters
+    ----------
       psi1: torch.tensor, the wavefunction
       utot1: torch.tensor, the total potential
       dtau:
       p_sq: torch.tensor, the squared momentum grid
       d_x: int, the product of the grid dimensions
-    Returns:
-    --------
+    
+    Returns
+    -------
       torch.tensor, the updated wavefunction
     """
     # split-step evolution
@@ -257,14 +265,15 @@ def calculate_velocity2D(phase2D, p_grid):
     For the calculation of the gradient, spectral derivative is used.
     It is assumed that the 2D plane is the n1-n3 defined plane.
     Note: the result needs to be multiplied by hbar/m
-    Args:
-    -----
+    
+    Parameters
+    ----------
     phase2D: torch.Tensor, the phase of the condensate wavefunction
     p_grid: Tuple[torch.Tensor], the momentum space grid with the
       i-th component being the momentum axis along ni (i=1,2,3)
 
-    Returns:
-    --------
+    Returns
+    -------
       torch.Tensor, the grad of the phase
     """
     spect_x = p_grid[0] * torch.fft.fftn(phase2D) * 1j
@@ -281,14 +290,14 @@ def rms_radius(psi, center, space_grid):
     
     RMS = {1/(N) * Sum[(r-center)**2 * |psi|**2]}**0.5
 
-    Args:
-    -----
+    Parameters
+    ----------
     psi: torch.Tensor, the normalised wavefunction
     center: torch.Tensor, the centers of the space axes x1, x2, x3
     space_grid: torch.Tensor, the meshgrid of the space
 
-    Returns:
-    --------
+    Returns
+    -------
     rms: torch.Tensor, a single value of the RMS calculation
     """
     center_x = center[0] 
@@ -307,8 +316,8 @@ def calculate_cross_section_line(psi, axis=1):
     Assuming the condensate on the x-z plane and centered, then the cross
     section line would be with respect to one of the axis.
 
-    Args
-    ----
+    Parameters
+    ----------
     psi: torch.Tensor, the BEC wavefunction
     axis: int, axis 1 means x and axis 2 means z, default is 1
 

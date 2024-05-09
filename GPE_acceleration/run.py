@@ -1,7 +1,7 @@
 import GPE_acceleration.application as application
 import torch
-from models.system import System
-from models.simulation import Simulations
+from GPE_acceleration.models.system import System
+from GPE_acceleration.models.simulation import Simulations
 
 def main():
     # Set up the application

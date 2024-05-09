@@ -1,6 +1,6 @@
 """Provides the class for the simulation"""
-import utils.setup_simulations as setup_simulations
-from models.BEC import BEC
+import GPE_acceleration.utils.setup_simulations as setup_simulations
+from GPE_acceleration.models.BEC import BEC
 import os
 from pathlib import Path
 import torch

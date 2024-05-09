@@ -2,10 +2,10 @@
 Provides the BEC class.
 Once a BEC object is initialised, its evolution can be run.
 """
-import library.gpe_library as gpe
-import library.ground_state as gs
-import library.read_write_utils as rw
-import utils.video_creation
+import GPE_acceleration.library.gpe_library as gpe
+import GPE_acceleration.library.ground_state as gs
+import GPE_acceleration.library.read_write_utils as rw
+from GPE_acceleration.utils import video_creation
 import numpy as np
 import os
 import torch
@@ -300,11 +300,11 @@ class BEC:
         rw.save_tensor_to_csv(cross_line, "cross_line_density.csv")
 
         # create the full video
-        utils.video_creation.create_video(count=count,\
+        video_creation.create_video(count=count,\
                         simulation_name=SimulationName,\
                         n1=n1,n3=n3
                         )
         if self.app.write_velocity:
-            utils.video_creation.create_velocity_video(count,\
+            video_creation.create_velocity_video(count,\
                                                     SimulationName,\
                                                     n1,n3)
