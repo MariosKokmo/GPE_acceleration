@@ -344,6 +344,7 @@ def _perform_reimprint_checks(simulation_params):
   ## Perform reimprint checks  #####
   ##################################
   sim_time = simulation_params["Total_simulation_time"] # time in sec
+  snapshots = simulation_params["shots"]
   if simulation_params["repetitive"] and (len(simulation_params["imprint_times"]) != len(simulation_params["imprinting_charge"])):
       msg = f"One list of imprinting times should be given for every simulation"
       return True, msg
@@ -361,8 +362,8 @@ def _perform_reimprint_checks(simulation_params):
                   return False, msg
       for index, times in enumerate(simulation_params["imprint_times"]):
       # check that the maximum imprint time is less than simulation time
-      # imprint times are given in ms
-          if max(times)/1000 > sim_time:
+      # imprint times are given in snapshots
+          if max(times) > snapshots:
               msg = f"The maximum imprint time is greater than the total simulation time for simulation {index+1}\n"
               return True, msg
   return True, ""

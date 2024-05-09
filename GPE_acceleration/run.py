@@ -1,4 +1,4 @@
-import application
+import GPE_acceleration.application as application
 import torch
 from models.system import System
 from models.simulation import Simulations

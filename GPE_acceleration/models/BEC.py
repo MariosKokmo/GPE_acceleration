@@ -1,4 +1,7 @@
-"""Provides the BCE class"""
+"""
+Provides the BEC class.
+Once a BEC object is initialised, its evolution can be run.
+"""
 import library.gpe_library as gpe
 import library.ground_state as gs
 import library.read_write_utils as rw
@@ -28,6 +31,7 @@ class BEC:
         Finds the ground state for the BEC in the system.
         If it exists, it just reads the file.
         The required format is `{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat`
+        If a ground state file does not exist, it is computed.
         """
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
         fx, fy, fz = self.system.simulation_parameters["Trapping_frequencies"]

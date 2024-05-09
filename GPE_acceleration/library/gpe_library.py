@@ -8,6 +8,16 @@ def init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device):
     Initialises the grid for x and p spaces
     and the external potential
 
+    Args
+    ----
+    x_min:
+    x_max:
+    dx:
+    dp:
+    w:
+    n1,n2,n3:
+    device:
+    
     Returns
     -------
     x1, x2, x3: torch.Tensor, the respective real space axis
