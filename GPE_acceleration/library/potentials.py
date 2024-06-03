@@ -118,6 +118,10 @@ class RampHarmonicPot(Potential):
       self.form = lambda t: initial + (amplitude - initial) * ((t-tinit) / (tfinal-tinit))
 
 class CustomPot(Potential):
+   """
+   Custom potential. The time dependence and the shape of the potential need to
+   be defined.
+   """
    def __init__(self, app, **kwargs):
       n1, n2, n3 = kwargs["Grid_resolution"]
       x_min = kwargs["x_min"]
@@ -129,6 +133,6 @@ class CustomPot(Potential):
       x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
       gx, gy, gz = torch.meshgrid(x1, x2, x3)
       self.pot = None
-      self.potential = None
+      self.potential = self.pot.to(device=app.device, dtype=torch.double)
       self.form = None
       assert (not self.pot) or (not self.potential) or (not self.form), "The potential is not configured yet."
