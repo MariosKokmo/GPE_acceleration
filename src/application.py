@@ -1,6 +1,6 @@
 """Application-wide Configuration"""
 from datetime import datetime as dt
-from GPE_acceleration.utils.setup_simulations import get_application_config
+from utils.setup_simulations import get_application_config
 
 class application:
     def __init__(self):

@@ -2,10 +2,10 @@
 Provides the BEC class.
 Once a BEC object is initialised, its evolution can be run.
 """
-import GPE_acceleration.library.gpe_library as gpe
-import GPE_acceleration.library.ground_state as gs
-import GPE_acceleration.utils.read_write_utils as rw
-from GPE_acceleration.utils import video_creation
+import src.library.gpe_library as gpe
+import src.library.ground_state as gs
+import src.utils.read_write_utils as rw
+from src.utils import video_creation
 import numpy as np
 import os
 import torch

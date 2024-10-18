@@ -3,7 +3,7 @@ import pandas as pd
 import json
 import os
 import math
-from library.gpe_library import CONSTANTS
+from src.library.gpe_library import CONSTANTS
 
 
 def _read_configuration_file(ConfigFile):

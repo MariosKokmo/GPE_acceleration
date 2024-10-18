@@ -286,7 +286,7 @@ def calculate_velocity2D(phase2D, p_grid):
 
 def rms_radius(psi, center, space_grid):
     """
-    Calculates the RMS radius of the condensate.
+    Calculates the RMS radius of the condensate. Assumes a symmetric condensate.
     
     RMS = {1/(N) * Sum[(r-center)**2 * |psi|**2]}**0.5
 
@@ -332,3 +332,74 @@ def calculate_cross_section_line(psi, axis=1):
     if axis == 2:
         cross_line = torch.sum(torch.abs(psi[:,:,n3//2])**2, dim=0)
     return cross_line
+
+def mod_grad_psi(psi, p_grid):
+    """
+    Returns the modulus of the gradient of the wavefunction.
+    Calculates the gradient in a cartesian system and then
+    returns the modulus.
+    It uses the Fourier transform to perform the gradient in
+    momentum space.
+
+    Parameters
+    ----------
+    psi: torch.Tensor, the condensate wavefunction
+    p_grid: Tuple[torch.Tensor], the momentum space grid with the
+      i-th component being the momentum axis along ni (i=1,2,3)
+
+    Returns
+    -------
+      torch.Tensor, the modulus gradient of the wavefunction
+    """
+    dim  = len(psi.shape)
+    if dim == 3:
+        px, py, pz = torch.meshgrid(*p_grid)
+        P = torch.stack((px, py, pz))
+        spec_x = P[0] * torch.fft.fftn(psi, norm='forward') * 1j
+        grad_x = torch.fft.ifftn(spec_x, norm='forward').real
+        spec_y = P[1] * torch.fft.fftn(psi, norm='forward') * 1j
+        grad_y = torch.fft.ifftn(spec_y, norm='forward').real
+        spec_z = P[2] * torch.fft.fftn(psi, norm='forward') * 1j
+        grad_z = torch.fft.ifftn(spec_z, norm='forward').real
+        grad_modulus = torch.sqrt(grad_x**2 + grad_y**2 + grad_z**2)
+    elif dim == 2:
+        px, py = torch.meshgrid(p_grid[0],p_grid[1])
+        P = torch.stack((px,py))
+        spec_x = P[0] * torch.fft.fft2(psi, norm='forward') * 1j
+        grad_x = torch.fft.ifft2(spec_x, norm='forward').real
+        spec_y = P[1] * torch.fft.fft2(psi, norm='forward') * 1j
+        grad_y = torch.fft.ifft2(spec_y, norm='forward').real
+        grad_modulus = torch.sqrt(grad_x**2 + grad_y**2)
+    elif dim == 1:
+        spect_x = p_grid[0] * torch.fft.fft(psi, norm='forward') * (1j)
+        grad_modulus = torch.fft.ifft(spect_x, norm='forward').real
+    
+    return grad_modulus
+
+def calculate_energy_allocation(psi, Vext, p_grid, **parameters):
+    """
+    Calculates the energy allocation for the condensate at every moment.
+    Specifically returns the kinetic, potential and interaction terms of the energy. 
+
+    Parameters
+    ----------
+    psi: torch.Tensor, the BEC wavefunction
+    Vext: torch.Tensor, the external potential
+    p_grid: , the momentum grid of the system
+
+    Returns
+    -------
+    energies: Dict[str:float], the energy terms 
+    """
+    hbar = CONSTANTS.hbar
+    m = parameters['m']
+
+    grad_sq = torch.pow(mod_grad_psi(psi, p_grid), 2)
+    e_kin = hbar**2 / (2*m) * torch.sum(grad_sq)
+    e_pot = 0
+    e_int = 0
+    E_total = e_kin + e_pot + e_int
+    return {'e_kin' : e_kin,
+            'e_pot' : e_pot,
+            'e_int' : e_int,
+            'E_total' : E_total}

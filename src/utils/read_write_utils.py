@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import pandas as pd
 import matplotlib.pyplot as plt
-from GPE_acceleration.library.gpe_library import calculate_velocity2D
+from src.library.gpe_library import calculate_velocity2D
 
 def write_psi(file_name, psi, n1, n2, n3):
     """
