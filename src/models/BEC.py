@@ -304,6 +304,9 @@ class BEC:
         rw.save_cross_section_line_figure(cross_line)
         rw.save_tensor_to_csv(cross_line, "cross_line_density.csv")
 
+        # write the energies
+        rw.write_energy_terms(energies, "energies.txt")
+        
         # create the full video
         video_creation.create_video(count=count,\
                         simulation_name=SimulationName,\

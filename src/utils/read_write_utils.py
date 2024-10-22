@@ -172,7 +172,7 @@ def save_tensor_to_csv(tensor, filename):
     df = pd.DataFrame(tensor_np) #convert to a dataframe
     df.to_csv(filename,index=False, header=None) #save to file
 
-def write_energy_terms(energy, filename):
+def write_energy_terms(energies, filename):
     """
     Writes the energy allocation in a file.
     Parameters
@@ -182,5 +182,9 @@ def write_energy_terms(energy, filename):
         terms along with the total energy for a specific timestamp. 
     """
     with open(filename, 'w') as f:
-        for _ in range(energy):
-            f.write(f'{energy['e_kin']},{energy['e_pot']},{energy['e_int']},{energy['E_total']}\n')
+        for energy in energies:
+            e_kin = energy['e_kin']
+            e_pot = energy['e_pot']
+            e_int = energy['e_int']
+            E_total = energy['E_total']
+            f.write(f"{e_kin},{e_pot},{e_int},{E_total}\n")

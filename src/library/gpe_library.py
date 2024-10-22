@@ -398,9 +398,9 @@ def calculate_energy_allocation(psi, Vext, p_grid, **parameters):
     # |nabla(psi)|**2
     grad_sq = torch.pow(mod_grad_psi(psi, p_grid), 2)
 
-    e_kin = hbar**2 / (2*m) * torch.sum(grad_sq)
+    e_kin = (1/2) * torch.sum(grad_sq)
     e_pot = torch.sum(Vext * torch.abs(psi)**2)
-    e_int = g * torch.sum(torch.abs(psi)**4)
+    e_int = (u/2) * torch.sum(torch.abs(psi)**4)
     E_total = e_kin + e_pot + e_int
     return {'e_kin' : e_kin,
             'e_pot' : e_pot,
