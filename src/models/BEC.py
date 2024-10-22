@@ -245,6 +245,9 @@ class BEC:
         # create storage for the line cross sections
         cross_line = torch.zeros(shots, n1)
 
+        # create storage for the energy allocation
+        energies = []
+
         for iteration in range(kmax):
             t = dt*iteration*omega_ho
             utot = u*torch.abs(self.psi)**2 + uext # Total potential shape (n1,n2,n3)
@@ -260,6 +263,8 @@ class BEC:
                 rms_measurements[count] = rms
 
                 cross_line[count,:] = gpe.calculate_cross_section_line(self.psi)
+
+                energies.append(gpe.calculate_energy_allocation(self.psi, uext, p_grid, {'u': u}))
 
                 count += 1
                 self.logger.write(f"t = {t/omega_ho}\n")
