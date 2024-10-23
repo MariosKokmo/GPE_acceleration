@@ -333,7 +333,7 @@ def calculate_cross_section_line(psi, axis=1):
         cross_line = torch.sum(torch.abs(psi[:,:,n3//2])**2, dim=0)
     return cross_line
 
-def mod_grad_psi(psi, p_grid):
+def mod_grad_psi(psi, p_axes):
     """
     Returns the modulus of the gradient of the wavefunction.
     Calculates the gradient in a cartesian system and then
@@ -344,7 +344,7 @@ def mod_grad_psi(psi, p_grid):
     Parameters
     ----------
     psi: torch.Tensor, the condensate wavefunction
-    p_grid: Tuple[torch.Tensor], the momentum space grid with the
+    p_axes: Tuple[torch.Tensor], the momentum space grid with the
       i-th component being the momentum axis along ni (i=1,2,3)
 
     Returns
@@ -353,8 +353,8 @@ def mod_grad_psi(psi, p_grid):
     """
     dim  = len(psi.shape)
     if dim == 3:
-        px, py, pz = torch.meshgrid(*p_grid)
-        P = torch.stack((px, py, pz))
+        px, py, pz = torch.meshgrid(p_axes[0], p_axes[1], p_axes[2])
+        P = torch.stack((px,py,pz))
         spec_x = P[0] * torch.fft.fftn(psi, norm='forward') * 1j
         grad_x = torch.fft.ifftn(spec_x, norm='forward').real
         spec_y = P[1] * torch.fft.fftn(psi, norm='forward') * 1j
@@ -363,7 +363,7 @@ def mod_grad_psi(psi, p_grid):
         grad_z = torch.fft.ifftn(spec_z, norm='forward').real
         grad_modulus = torch.sqrt(grad_x**2 + grad_y**2 + grad_z**2)
     elif dim == 2:
-        px, py = torch.meshgrid(p_grid[0],p_grid[1])
+        px, py = torch.meshgrid(p_axes[0], p_axes[1])
         P = torch.stack((px,py))
         spec_x = P[0] * torch.fft.fft2(psi, norm='forward') * 1j
         grad_x = torch.fft.ifft2(spec_x, norm='forward').real
@@ -371,7 +371,7 @@ def mod_grad_psi(psi, p_grid):
         grad_y = torch.fft.ifft2(spec_y, norm='forward').real
         grad_modulus = torch.sqrt(grad_x**2 + grad_y**2)
     elif dim == 1:
-        spect_x = p_grid[0] * torch.fft.fft(psi, norm='forward') * (1j)
+        spect_x = p_axes[0] * torch.fft.fft(psi, norm='forward') * (1j)
         grad_modulus = torch.fft.ifft(spect_x, norm='forward').real
     
     return grad_modulus
