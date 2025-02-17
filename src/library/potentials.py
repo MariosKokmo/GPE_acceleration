@@ -32,6 +32,7 @@ class Potential():
       """
       self.form
       self.potential
+      self.switchOff_time
     
     def evol(self, t):
       """
@@ -44,6 +45,13 @@ class Potential():
        torch.Tensor, the potential at time t
       """
       return self.form(t) * self.potential
+    
+    def zero(self):
+      """
+      Sets the potential to zero.
+      """
+      self.potential = torch.zeros_like(self.potential)
+      return self.potential
 
 class ConstPot(Potential):
    """Constant potential across the grid"""
@@ -79,6 +87,7 @@ class HarmonicPot(Potential):
       x_min = kwargs["x_min"]
       dx = kwargs["dx"]
       w = kwargs["w"]
+      self.switchOff_time = kwargs["SwitchOff_time"]
       # Build space and momentum grids
       x1 = x_min[0] + torch.arange(n1, dtype=torch.float64)*dx[0] # size n1
       x2 = x_min[1] + torch.arange(n2, dtype=torch.float64)*dx[1]

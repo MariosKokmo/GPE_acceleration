@@ -221,6 +221,7 @@ def get_simulation_parameters(ConfigFilePath):
       "x_max":x_max,
       "Trapping_frequencies":sim_params["Trapping_frequencies"],
       "Potential_type":sim_params["Potential_type"],
+      "SwitchOff_time":sim_params["SwitchOff_time"],
       "w":w,
       "dx":dx,
       "dp":dp,
@@ -250,6 +251,14 @@ def get_simulation_parameters(ConfigFilePath):
   if not ok:
     print(msg)
   return simulation_params, msg
+
+def save_parameters_to_json(parameters):
+  """
+  saves the simulation parameters as a json file. This is expected to be called
+  for each simulation hence saving a json file in each simulation folder.
+  """
+  with open("simulation_parameters", "w") as fp:
+    json.dump(parameters , fp)
 
 def _check_simulation_parameters(simulation_params):
   """Performs checks of the simulation parameters

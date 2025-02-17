@@ -344,8 +344,10 @@ def mod_grad_psi(psi, p_axes):
     Parameters
     ----------
     psi: torch.Tensor, the condensate wavefunction
-    p_axes: Tuple[torch.Tensor], the momentum space grid with the
-      i-th component being the momentum axis along ni (i=1,2,3)
+    p_axes: List[torch.Tensor], the momentum space grid with the
+      i-th component being the momentum axis along ni (i=1,2,3).
+      Example of component is p1[0]. Note the access to the first item
+      of the axis since the shape is expected 1xN.
 
     Returns
     -------

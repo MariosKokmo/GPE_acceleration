@@ -292,6 +292,10 @@ class BEC:
                 if (num_imprints < max_imprints) and (num_imprints < len(imprint_times)):# to avoid out-of-bounds index
                     imprintTime = imprint_times[num_imprints]
 
+            # if the time is greater than the switchOff_time, turn off potential
+            if (iteration >= (kmax//shots) * self.system.uext.switchOff_time):
+                uext = self.system.uext.zero()
+            
             # split-step evolution
             self._step(utot, dtau, p_sq, d_x)
         

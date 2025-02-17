@@ -51,6 +51,9 @@ class Simulations:
             self.logger.write(f"\n[INFO]: {self.time} -- Currently in: {os.getcwd()}\n\n")
             self.logger.write(f"[INFO]: {self.time} -- Running: {simulation_name}, started at {self.time}\n")
             
+            # save the simulation parameters as a json file
+            setup_simulations.save_parameters_to_json(parameters)
+
             # define the BEC
             self.BEC = BEC(parameters, self.system,  self.app, simulation_name)
             self.BEC.evolve()
