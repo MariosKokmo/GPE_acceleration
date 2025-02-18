@@ -25,6 +25,7 @@ class BEC:
         self.gs_path = None
         self.repetitive_phase = None
         self.all_phases = {}
+        self.reset_potential = False
 
     def _find_ground_state(self):
         """
@@ -137,7 +138,7 @@ class BEC:
         """
         Takes as input 3 arrays. Each array is for one simulation and
         can contain multiple sub-arrays. Each sub-array contains the vortex-related
-        parameters for a differetn imprint time.
+        parameters for a different imprint time.
         
         Returns:
         --------
@@ -293,13 +294,17 @@ class BEC:
                     imprintTime = imprint_times[num_imprints]
 
             # if the time is greater than the switchOff_time, turn off potential
-            if (iteration >= (kmax//shots) * self.system.uext.switchOff_time):
+            if (iteration >= (kmax//shots) * self.system.uext.switchOff_time) and (not self.reset_potential):
+                self.logger.write(f"[INFO]: {self.time()} -- External potential set to zero\n")
                 uext = self.system.uext.zero()
+                self.reset_potential = True
             
             # split-step evolution
             self._step(utot, dtau, p_sq, d_x)
         
-
+        ###############################################################
+        ##############    WRITE VARIOUS FILES   #######################
+        ###############################################################
         # Write the RMS measurements in a file
         rw.write_rms(rms_measurements, SimulationName)
         rw.save_rms_figure(f'{SimulationName}_RMS_meas.txt')

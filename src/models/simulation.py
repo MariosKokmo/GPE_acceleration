@@ -1,4 +1,5 @@
-"""Provides the class for the simulation"""
+"""Provides the class for the simulation. The simulations need a system i.e. laboratory setup
+and a BEC model i.e. condensate that will evolve."""
 import src.utils.setup_simulations as setup_simulations
 from src.models.BEC import BEC
 import os
@@ -52,7 +53,7 @@ class Simulations:
             self.logger.write(f"[INFO]: {self.time} -- Running: {simulation_name}, started at {self.time}\n")
             
             # save the simulation parameters as a json file
-            setup_simulations.save_parameters_to_json(parameters)
+            setup_simulations.save_parameters_to_json(self.system.simulation_parameters)
 
             # define the BEC
             self.BEC = BEC(parameters, self.system,  self.app, simulation_name)
