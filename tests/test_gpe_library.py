@@ -1,8 +1,10 @@
 import unittest
 import numpy as np
 import torch
+import sys
+sys.path.append('.')
+from src.library import gpe_library as gpe
 
-import src.library.gpe_library as gpe
 
 class TestModGradPsi(unittest.TestCase):
     """Tests for the function that returns the modulus of the gradient"""

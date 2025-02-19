@@ -257,8 +257,13 @@ def save_parameters_to_json(parameters):
   saves the simulation parameters as a json file. This is expected to be called
   for each simulation hence saving a json file in each simulation folder.
   """
+  def convert(x):
+    if hasattr(x, "tolist"):  # numpy arrays have this
+        return x.tolist()
+    raise TypeError(x)
+  
   with open("simulation_parameters", "w") as fp:
-    json.dump(parameters , fp)
+    json.dump(parameters , fp, indent = 4, default=convert)
 
 def _check_simulation_parameters(simulation_params):
   """Performs checks of the simulation parameters
