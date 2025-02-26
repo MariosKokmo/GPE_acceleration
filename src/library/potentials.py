@@ -71,9 +71,10 @@ class RampPot(Potential):
       self.form = lambda t: (initial + (final - initial) * (t / tfinal))
 
 class HarmonicPot(Potential):
-   """Returns a harmonic potential of the form 
+    """Returns a harmonic potential of the form 
       amplitude * 1/2 * (wx*x^2 + wy*y^2 + wz*z^2)"""
-   def __init__(self, app, amplitude=1, **kwargs):
+    
+    def __init__(self, app, amplitude=1, **kwargs):
       """
       Sets the time-dependence of the potential in the `form` parameter
       and the shape of the potential in the `potential` parameter of the class.
@@ -83,38 +84,31 @@ class HarmonicPot(Potential):
       app: application,
       amplitude: float, the final value of the potential, default=1.0
       """
-      n1, n2, n3 = kwargs["Grid_resolution"]
-      x_min = kwargs["x_min"]
-      dx = kwargs["dx"]
-      w = kwargs["w"]
-      self.switchOff_time = kwargs["SwitchOff_time"]
+      self.app = app
+      self.x_min = kwargs["x_min"]
+      self.n1, self.n2, self.n3 = kwargs["Grid_resolution"]
+      self.dx = kwargs["dx"]
+      self.w = kwargs["w"]
+      
       # Build space and momentum grids
-      x1 = x_min[0] + torch.arange(n1, dtype=torch.float64)*dx[0] # size n1
-      x2 = x_min[1] + torch.arange(n2, dtype=torch.float64)*dx[1]
-      x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
-      gx, gy, gz = torch.meshgrid(x1, x2, x3)
-      self.pot = 0.5 * amplitude * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
-      self.potential = self.pot.to(device=app.device, dtype=torch.double)
+      self.x1 = self.x_min[0] + torch.arange(self.n1, dtype=torch.float64)*self.dx[0] # size n1
+      self.x2 = self.x_min[1] + torch.arange(self.n2, dtype=torch.float64)*self.dx[1]
+      self.x3 = self.x_min[2] + torch.arange(self.n3, dtype=torch.float64)*self.dx[2]
+      
+      gx, gy, gz = torch.meshgrid(self.x1, self.x2, self.x3)
+      self.pot = 0.5 * amplitude * ((self.w[0]*gx)**2 + (self.w[1]*gy)**2 + (self.w[2]*gz)**2)
+      self.potential = self.pot.to(device=self.app.device, dtype=torch.double)
       self.form = lambda t: 1
-
-   def zero_2D(self, app, amplitude=1, **kwargs):
+    
+    def zero_2D(self, amplitude=1):
       """
       shuts off the potential only on 2 dimensions. The 3rd dimension that is considered flat
       is still kept.
       Returns a new potential.
-      """
-      n1, n2, n3 = kwargs["Grid_resolution"]
-      x_min = kwargs["x_min"]
-      dx = kwargs["dx"]
-      w = kwargs["w"]
-      self.switchOff_time = kwargs["SwitchOff_time"]
-      # Build space and momentum grids
-      x1 = x_min[0] + torch.arange(n1, dtype=torch.float64)*dx[0] # size n1
-      x2 = x_min[1] + torch.arange(n2, dtype=torch.float64)*dx[1]
-      x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
-      gx, gy, gz = torch.meshgrid(torch.zeros_like(x1), x2, torch.zeros_like(x3))
-      self.pot = 0.5 * amplitude * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
-      self.potential = self.pot.to(device=app.device, dtype=torch.double)
+      """ 
+      gx, gy, gz = torch.meshgrid(torch.zeros_like(self.x1), self.x2, torch.zeros_like(self.x3))
+      self.pot = 0.5 * amplitude * ((self.w[0]*gx)**2 + (self.w[1]*gy)**2 + (self.w[2]*gz)**2)
+      self.potential = self.pot.to(device=self.app.device, dtype=torch.double)
       self.form = lambda t: 1
 
 
