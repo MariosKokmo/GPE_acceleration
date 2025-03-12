@@ -110,6 +110,7 @@ class HarmonicPot(Potential):
       self.pot = 0.5 * amplitude * ((self.w[0]*gx)**2 + (self.w[1]*gy)**2 + (self.w[2]*gz)**2)
       self.potential = self.pot.to(device=self.app.device, dtype=torch.double)
       self.form = lambda t: 1
+      return self.potential
 
 
 class RampHarmonicPot(Potential):

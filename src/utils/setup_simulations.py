@@ -7,7 +7,8 @@ from src.library.gpe_library import CONSTANTS
 
 
 def _read_configuration_file(ConfigFile):
-  """Reads the configuration file
+  """
+  Reads the configuration file for the simulations.
   
   Args: str, the path to the file
   Returns: dictionary, the contents of the configuration file
@@ -20,7 +21,8 @@ def _read_configuration_file(ConfigFile):
   return simulations
 
 def get_application_config(ConfigFile="appConfig.json"):
-  """Reads the app configuration file
+  """
+  Reads the app configuration file
   
   Args: str, the path to the file
   Returns: dictionary, the contents of the configuration file
@@ -162,11 +164,11 @@ def get_simulation_parameters(ConfigFilePath):
   x_min = np.array(sim_params["Grid_negative_limits"])
   x_max = np.array(sim_params["Grid_positive_limits"])
   # frequencies
-  fx, fz, fy = sim_params["Trapping_frequencies"]
+  fx, fy, fz = sim_params["Trapping_frequencies"]
   wx = 2*pi*float(fx)
   wy = 2*pi*float(fy)
   wz = 2*pi*float(fz)
-  w = np.array([wx,wz,wy])
+  w = np.array([wx,wy,wz])
   omega_ho = (wx*wy*wz)**(1/3)
   # Time steps
   t_evol = sim_params["Total_simulation_time"]

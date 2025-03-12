@@ -31,8 +31,8 @@ class Simulations:
 
     def run_simulations(self):
         """
-        For every simulation, it creates the BEC.
-        Runs the simulation.
+        For every simulation, it creates a new BEC.
+        Then runs the simulation.
         """
         # Run the simulations
         for combination in self.simulation_combinations:
@@ -62,7 +62,7 @@ class Simulations:
             # close the logfile
             self.app.close_logger()
             
-            # go back to the parent directory to run the next sim
+            # go back to the parent directory to prepare to run the next sim
             path = Path(os.getcwd())
             parent_path = path.parent.absolute()
             os.chdir(parent_path)
