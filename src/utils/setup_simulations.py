@@ -377,7 +377,7 @@ def _perform_reimprint_checks(simulation_params):
   snapshots = simulation_params["shots"]
   if simulation_params["repetitive"] and (len(simulation_params["imprint_times"]) != len(simulation_params["imprinting_charge"])):
       msg = f"One list of imprinting times should be given for every simulation"
-      return True, msg
+      return False, msg
   if simulation_params["repetitive"]:
       if len(simulation_params["vortex_charge"]) != len(simulation_params["imprinting_charge"]):
           msg = f"The list number of initial charges {len(simulation_params['vortex_charge'])}, doesn't agree with the list number of imprinted {len(simulation_params['imprinting_charge'])}"
@@ -390,10 +390,13 @@ def _perform_reimprint_checks(simulation_params):
               if len(charges) != len(simulation_params["imprint_position_y"][index]):
                   msg = f"The number of imprinting charges doesn't agree with the number of y positions at index {index}"
                   return False, msg
+              if len(charges) != len(simulation_params["vortex_charge"][index]):
+                  msg = f"The number of imprinting charges doesn't agree with the number of charges at index {index}"
+                  return False, msg
       for index, times in enumerate(simulation_params["imprint_times"]):
       # check that the maximum imprint time is less than simulation time
       # imprint times are given in snapshots
           if max(times) > snapshots:
               msg = f"The maximum imprint time is greater than the total simulation time for simulation {index+1}\n"
-              return True, msg
+              return False, msg
   return True, ""
