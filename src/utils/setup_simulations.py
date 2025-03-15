@@ -257,7 +257,7 @@ def get_simulation_parameters(ConfigFilePath):
     print(msg)
   return simulation_params, msg
 
-def save_parameters_to_json(parameters):
+def save_parameters_to_json(parameters, filepath="simulation_parameters.json"):
   """
   saves the simulation parameters as a json file. This is expected to be called
   for each simulation hence saving a json file in each simulation folder.
@@ -267,7 +267,7 @@ def save_parameters_to_json(parameters):
         return x.tolist()
     raise TypeError(x)
   
-  with open("simulation_parameters", "w") as fp:
+  with open(filepath, "w") as fp:
     json.dump(parameters , fp, indent = 4, default=convert)
 
 def _check_simulation_parameters(simulation_params):

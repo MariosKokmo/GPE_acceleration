@@ -3,14 +3,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import sys
 import unittest
+import os
+import json
 sys.path.append(".")
-from src.utils import setup_simulations as ss
 from src.utils.setup_simulations import _perform_vortex_checks
 from src.utils.setup_simulations import _perform_reimprint_checks
+from src.utils.setup_simulations import save_parameters_to_json
 
-# Test save_parameters_to_json
-# params = {'x':np.array([1,2,3]), 'y':np.array([[1,2],[3,4]]), 'z':5, 't': 'potential'}
-# ss.save_parameters_to_json(params)
 
 class TestPerformVortexChecks(unittest.TestCase):
     def test_valid_vortex_parameters(self):
@@ -207,6 +206,78 @@ class TestPerformReimprintChecks(unittest.TestCase):
         result, msg = _perform_reimprint_checks(simulation_params)
         self.assertFalse(result)
         self.assertIn("The maximum imprint time is greater than the total simulation time", msg)
+
+class TestSaveParametersToJson(unittest.TestCase):
+    def setUp(self):
+        """Set up a temporary file name for testing."""
+        self.test_file = "test_simulation_parameters.json"
+
+    def tearDown(self):
+        """Clean up the test file after each test."""
+        if os.path.exists(self.test_file):
+            os.remove(self.test_file)
+
+    def test_save_parameters_to_json(self):
+        """Test saving parameters to a JSON file."""
+        parameters = {
+            "Grid_resolution": [128, 128, 128],
+            "Total_simulation_time": 10.0,
+            "Trapping_frequencies": [1.0, 1.0, 1.0],
+            "vortex_charge": [1, -1],
+            "imprinting_charge": [2, -2],
+            "vortex_position_x": [10, -10],
+            "vortex_position_y": [15, -15]
+        }
+
+        # Save parameters to a JSON file
+        save_parameters_to_json(parameters, filepath=self.test_file)
+
+        # Check if the file was created
+        self.assertTrue(os.path.exists(self.test_file))
+
+        # Load the file and verify its contents
+        with open(self.test_file, "r") as file:
+            saved_parameters = json.load(file)
+
+        self.assertEqual(parameters, saved_parameters)
+
+    def test_save_numpy_array_to_json(self):
+        """Test saving parameters with numpy arrays to a JSON file."""
+        import numpy as np
+
+        parameters = {
+            "Grid_resolution": np.array([128, 128, 128]),
+            "Total_simulation_time": 10.0,
+            "Trapping_frequencies": np.array([1.0, 1.0, 1.0]),
+        }
+
+        # Save parameters to a JSON file
+        save_parameters_to_json(parameters, filepath=self.test_file)
+
+        # Check if the file was created
+        self.assertTrue(os.path.exists(self.test_file))
+
+        # Load the file and verify its contents
+        with open(self.test_file, "r") as file:
+            saved_parameters = json.load(file)
+
+        # Convert numpy arrays to lists for comparison
+        expected_parameters = {
+            "Grid_resolution": [128, 128, 128],
+            "Total_simulation_time": 10.0,
+            "Trapping_frequencies": [1.0, 1.0, 1.0],
+        }
+
+        self.assertEqual(expected_parameters, saved_parameters)
+
+    def test_invalid_type_raises_error(self):
+        """Test that saving unsupported types raises a TypeError."""
+        parameters = {
+            "unsupported_type": set([1, 2, 3])  # Sets are not JSON serializable
+        }
+
+        with self.assertRaises(TypeError):
+            save_parameters_to_json(parameters, filepath=self.test_file)
 
 if __name__ == "__main__":
     unittest.main()
