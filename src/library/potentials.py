@@ -6,13 +6,16 @@ import torch
 ###############################################################################
 def select_potential(potentialType, app, **simulation_parameters):
    potentialType = potentialType.strip().lower()
-   # available_potentials = {
-   #    "harmonic" : HarmonicPot(app, **simulation_parameters),
-   #    "constant" : ConstPot(app, **simulation_parameters),
-   #    "ramp" : RampPot(app, **simulation_parameters),
-   #    "rampharmonic" : RampHarmonicPot(app, **simulation_parameters),
-   #    "custom" : CustomPot(app, **simulation_parameters),
-   # }
+   available_potentials = [
+      "harmonic", 
+      "constant",
+      "ramp" ,
+      "rampharmonic",
+      "custom"
+      ]
+   if potentialType not in available_potentials:
+      raise ValueError(f"Potential type {potentialType} is not available. Available potentials are {available_potentials}")
+   
    if potentialType == "harmonic":
       return HarmonicPot(app, **simulation_parameters)
    elif potentialType == "constant":
@@ -55,9 +58,10 @@ class Potential():
 
 class ConstPot(Potential):
    """Constant potential across the grid"""
-   def __init__(self, amplitude, grid, device):
-      n1, n2, n3 = grid
-      self.potential = amplitude * torch.ones(n1,n2,n3, dtype=torch.double, device=device)
+   def __init__(self, app, amplitude=1.0, **kwargs):
+      self.app = app
+      n1, n2, n3 = kwargs["Grid_resolution"]
+      self.potential = amplitude * torch.ones(n1,n2,n3, dtype=torch.double, device=self.app.device)
       self.form = lambda t: 1
 
 class RampPot(Potential):
@@ -65,9 +69,10 @@ class RampPot(Potential):
    Creates a ramp potential that evolves like
    initial + (final - initial) * (t / tfinal)
    """
-   def __init__(self, initial, final, grid, tfinal, device):
-      n1, n2, n3 = grid
-      self.potential = torch.ones(n1,n2,n3, dtype=torch.double, device=device)
+   def __init__(self, app, initial=1.0, final=2.0, tfinal=1.0, **kwargs):
+      self.app = app
+      n1, n2, n3 = kwargs["Grid_resolution"]
+      self.potential = torch.ones(n1,n2,n3, dtype=torch.double, device=self.app.device)
       self.form = lambda t: (initial + (final - initial) * (t / tfinal))
 
 class HarmonicPot(Potential):
@@ -116,7 +121,7 @@ class HarmonicPot(Potential):
 class RampHarmonicPot(Potential):
    """A harmonic potential that evolves linearly in time"""
    
-   def __init__(self, tfinal, app, initial=1.0, amplitude=1.0, tinit=0.0, **kwargs):
+   def __init__(self, app, initial=1.0, amplitude=1.0, tinit=0.0, tfinal=1.0,  **kwargs):
       """
       Sets the time-dependence of the potential in the `form` parameter
       and the shape of the potential in the `potential` parameter of the class.
