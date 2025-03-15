@@ -16,8 +16,11 @@ def _read_configuration_file(ConfigFile):
   cwd = os.getcwd()
   print(cwd)
   pathConfigFile = cwd + "/" + ConfigFile
-  with open(pathConfigFile, 'r') as f:
-    simulations = json.load(f)
+  try:
+    with open(pathConfigFile, 'r') as f:
+        simulations = json.load(f)
+  except json.JSONDecodeError as e:
+      raise ValueError(f"Failed to parse configuration file '{ConfigFile}': {e}")   
   return simulations
 
 def get_application_config(ConfigFile="appConfig.json"):
@@ -272,19 +275,30 @@ def _check_simulation_parameters(simulation_params):
   Args: dict, the simulation parameters
   Returns: 
     ok: bool, True if the checks pass, otherwise False
-    msg: str, the fault that was detected
+    msg: str, the faults that were detected
   """
+  overallMsg = ""
   ok, msg = True, ""
+  overallMsg += msg
+  overall = ok
 
   ok, msg = _perform_grid_checks(simulation_params)
-  
+  overallMsg += msg + "\n"
+  overall = overall and ok
+
   ok, msg = _perform_frequency_checks(simulation_params)
-  
+  overallMsg += msg + "\n"
+  overall = overall and ok
+
   ok, msg = _perform_vortex_checks(simulation_params)
-  
+  overallMsg += msg + "\n"
+  overall = overall and ok
+
   ok, msg = _perform_reimprint_checks(simulation_params)
-  
-  return ok, msg
+  overallMsg += msg + "\n"
+  overall = overall and ok
+
+  return ok, overallMsg
 
 
 def _perform_grid_checks(simulation_params):
