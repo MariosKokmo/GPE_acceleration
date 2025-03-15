@@ -1,8 +1,11 @@
-"""Provides the BCE class"""
-import library.gpe_library as gpe
-import library.ground_state as gs
-import library.read_write_utils as rw
-import utils.video_creation
+"""
+Provides the BEC class.
+Once a BEC object is initialised, its evolution can be run.
+"""
+import src.library.gpe_library as gpe
+import src.library.ground_state as gs
+import src.utils.read_write_utils as rw
+from src.utils import video_creation
 import numpy as np
 import os
 import torch
@@ -22,12 +25,14 @@ class BEC:
         self.gs_path = None
         self.repetitive_phase = None
         self.all_phases = {}
+        self.reset_potential = False
 
     def _find_ground_state(self):
         """
         Finds the ground state for the BEC in the system.
         If it exists, it just reads the file.
         The required format is `{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat`
+        If a ground state file does not exist, it is computed.
         """
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
         fx, fy, fz = self.system.simulation_parameters["Trapping_frequencies"]
@@ -133,7 +138,7 @@ class BEC:
         """
         Takes as input 3 arrays. Each array is for one simulation and
         can contain multiple sub-arrays. Each sub-array contains the vortex-related
-        parameters for a differetn imprint time.
+        parameters for a different imprint time.
         
         Returns:
         --------
@@ -241,6 +246,9 @@ class BEC:
         # create storage for the line cross sections
         cross_line = torch.zeros(shots, n1)
 
+        # create storage for the energy allocation
+        energies = []
+
         for iteration in range(kmax):
             t = dt*iteration*omega_ho
             utot = u*torch.abs(self.psi)**2 + uext # Total potential shape (n1,n2,n3)
@@ -256,6 +264,8 @@ class BEC:
                 rms_measurements[count] = rms
 
                 cross_line[count,:] = gpe.calculate_cross_section_line(self.psi)
+
+                energies.append(gpe.calculate_energy_allocation(self.psi, uext, p_grid, {'u': u}))
 
                 count += 1
                 self.logger.write(f"t = {t/omega_ho}\n")
@@ -283,10 +293,18 @@ class BEC:
                 if (num_imprints < max_imprints) and (num_imprints < len(imprint_times)):# to avoid out-of-bounds index
                     imprintTime = imprint_times[num_imprints]
 
+            # if the time is greater than the switchOff_time, turn off potential
+            if (iteration >= (kmax//shots) * self.system.uext.switchOff_time) and (not self.reset_potential):
+                self.logger.write(f"[INFO]: {self.time()} -- External potential set to zero\n")
+                uext = self.system.uext.zero()
+                self.reset_potential = True
+            
             # split-step evolution
             self._step(utot, dtau, p_sq, d_x)
         
-
+        ###############################################################
+        ##############    WRITE VARIOUS FILES   #######################
+        ###############################################################
         # Write the RMS measurements in a file
         rw.write_rms(rms_measurements, SimulationName)
         rw.save_rms_figure(f'{SimulationName}_RMS_meas.txt')
@@ -295,12 +313,15 @@ class BEC:
         rw.save_cross_section_line_figure(cross_line)
         rw.save_tensor_to_csv(cross_line, "cross_line_density.csv")
 
+        # write the energies
+        rw.write_energy_terms(energies, "energies.txt")
+        
         # create the full video
-        utils.video_creation.create_video(count=count,\
+        video_creation.create_video(count=count,\
                         simulation_name=SimulationName,\
                         n1=n1,n3=n3
                         )
         if self.app.write_velocity:
-            utils.video_creation.create_velocity_video(count,\
+            video_creation.create_velocity_video(count,\
                                                     SimulationName,\
                                                     n1,n3)

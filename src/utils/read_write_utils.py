@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import pandas as pd
 import matplotlib.pyplot as plt
-from .gpe_library import calculate_velocity2D
+from src.library.gpe_library import calculate_velocity2D
 
 def write_psi(file_name, psi, n1, n2, n3):
     """
@@ -22,7 +22,9 @@ def write_psi(file_name, psi, n1, n2, n3):
                     f.write(f'({psi[i,j,k].real},{psi[i,j,k].imag})\n')
 
 def write_data(psi1, count, x1, x3, n1, n3, a_ho):
-    """Writes the column density data on the x-z plane"""
+    """
+    Writes the column density data on the x-z plane
+    """
     file_name = f'R-{count:003}-cd.dat'
     with open(file_name, 'w') as f:
         for i in range(n1):
@@ -169,3 +171,20 @@ def save_tensor_to_csv(tensor, filename):
     tensor_np = tensor.numpy() #convert to Numpy array
     df = pd.DataFrame(tensor_np) #convert to a dataframe
     df.to_csv(filename,index=False, header=None) #save to file
+
+def write_energy_terms(energies, filename):
+    """
+    Writes the energy allocation in a file.
+    Parameters
+    ----------
+    energy: list[Dict], a list of dictionaries. Each dictionary is
+        the energy distribution among the kinetic, potential and interaction
+        terms along with the total energy for a specific timestamp. 
+    """
+    with open(filename, 'w') as f:
+        for energy in energies:
+            e_kin = energy['e_kin']
+            e_pot = energy['e_pot']
+            e_int = energy['e_int']
+            E_total = energy['E_total']
+            f.write(f"{e_kin},{e_pot},{e_int},{E_total}\n")

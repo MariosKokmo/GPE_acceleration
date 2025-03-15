@@ -1,7 +1,7 @@
 """Provides the laboratory system of external potential"""
-import library.gpe_library as gpe
-import utils.setup_simulations as setup_simulations
-from library.potentials import select_potential
+import src.library.gpe_library as gpe
+import src.utils.setup_simulations as setup_simulations
+from src.library.potentials import select_potential
 
 class System:
     def __init__(self, app):

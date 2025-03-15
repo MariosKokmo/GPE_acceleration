@@ -1,0 +1,48 @@
+import os
+import json
+from src.utils.setup_simulations import _check_simulation_parameters, get_simulation_parameters
+from src.run import main as run_code
+
+def validate_config(verbose, config_path):
+    """
+    Validates the configuration file for the simulation.
+
+    Parameters
+    ----------
+    verbose : int
+        Verbosity level (0: silent, 1: info, 2: debug).
+    config_path : str
+        Path to the configuration file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the configuration file does not exist.
+    ValueError
+        If the configuration file is invalid or missing required fields.
+    """
+    # Check if the configuration file exists
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Configuration file '{config_path}' does not exist.")
+
+    if verbose > 0:
+        print(f"[INFO] Found configuration file: {config_path}")
+
+    if verbose > 1:
+        print(f"[DEBUG] Loaded configuration: {config_path}")
+
+    params = get_simulation_parameters(config_path)
+    # Validate the configuration using functions from setup_simulations.py
+    try:
+        ok, msg =_check_simulation_parameters(params)
+    except ValueError as e:
+        raise ValueError(f"Configuration validation error: {e}")
+
+    if verbose > 0:
+        if ok:
+            print("[INFO] Configuration file validation passed.")
+        else:
+            print(msg)
+
+def run_simulations():
+    run_code()

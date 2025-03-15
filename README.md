@@ -8,6 +8,11 @@ A repetitive imprinting functionality is supported.
 
 The vortices are assumed to be printed on the n1-n3 (i.e. x-z plane). For the simulations to have physical meaning, it is assumed that the BEC is adequately flat on the n2 (y axis) so that the vortices are assumed to not bend and traverse the whole BEC along the y axis.
 
+## Features
+**Potentials**
+
+**Repetitive imprinting**
+
 ## Run
 To run the code, you simply run the `run.py` script. This script invokes any necessary function and set-up of the simulation.
 
@@ -102,8 +107,33 @@ _Second simulation_:
 
 We start with an initial vortex of charge 5 at position (0,0). We then imprint a vortex of charge 3 at position (0,0). Now we don't give exact times to imprint, so the "imprint_every" value of 50 will create the times. The imprints times will be 50, 100, 150. However, because the "max_imprints" are 2, only the imprints at times 50 and 100 will occur. Note that even that we give an "imprint_every" value, we have to give an empty list for the "imprint_times" otherwise an error will be raised. The software needs to be able to align the inputs at the same length.
 
+## Second example
+- "vortex_charge":[[5,5],[1,1,1,1,1,1,1]],
+- "imprinting_charge":[[[-5,-5]],[[0,0,0,0,0,0,0]]],
+- "vortex_position_x":[[0,0],[0,0,0,0,0,0,0]],
+- "vortex_position_y":[[-20,20],[-30,-20,-10,0,10,20,30]],
+- "initial_imprint_time":[4,4],
+- "imprint_position_x":[[[0,0]],[[0,0,0,0,0,0,0]]],
+- "imprint_position_y":[[[-20,20]],[[0,0,0,0,0,0,0]]],
+- "imprint_every":[[],[]],
+- "imprint_times":[[50],[50]],
+- "max_imprints":[1,0]
+
+This would also give two simulations.
+_First simulation_:
+we imprint two vortices of charge +5 each at positions (0,-20) and (0,20) at time 4.
+We thin imprint again at time 50, at the same positions two vortices of charges -5.
+
+_Second simulation_:
+We imprint 7 vortices of charge +1 each, all with an x coordinate equal to 0, and linearly allocated between
+y=-30 and y=+30. We perform no imprints, note that the max_imprints variable is set to 0 for this simulation.
+
 List of available potentials:
 - **harmonic** , a harmonic potential with 3 trapping frequencies
 - **constant**, a constant potential across the whole grid
 - **ramp**, potential that ramps up from an initial to a final amplitude in a linear fashion
 - **rampharmonic**, harmonic potential whose amplitude ramps up linearly in time
+
+# Contributing
+
+# License

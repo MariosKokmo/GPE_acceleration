@@ -3,11 +3,12 @@ import pandas as pd
 import json
 import os
 import math
-from library.gpe_library import CONSTANTS
+from src.library.gpe_library import CONSTANTS
 
 
 def _read_configuration_file(ConfigFile):
-  """Reads the configuration file
+  """
+  Reads the configuration file for the simulations.
   
   Args: str, the path to the file
   Returns: dictionary, the contents of the configuration file
@@ -15,12 +16,16 @@ def _read_configuration_file(ConfigFile):
   cwd = os.getcwd()
   print(cwd)
   pathConfigFile = cwd + "/" + ConfigFile
-  with open(pathConfigFile, 'r') as f:
-    simulations = json.load(f)
+  try:
+    with open(pathConfigFile, 'r') as f:
+        simulations = json.load(f)
+  except json.JSONDecodeError as e:
+      raise ValueError(f"Failed to parse configuration file '{ConfigFile}': {e}")   
   return simulations
 
 def get_application_config(ConfigFile="appConfig.json"):
-  """Reads the app configuration file
+  """
+  Reads the app configuration file
   
   Args: str, the path to the file
   Returns: dictionary, the contents of the configuration file
@@ -162,11 +167,11 @@ def get_simulation_parameters(ConfigFilePath):
   x_min = np.array(sim_params["Grid_negative_limits"])
   x_max = np.array(sim_params["Grid_positive_limits"])
   # frequencies
-  fx, fz, fy = sim_params["Trapping_frequencies"]
+  fx, fy, fz = sim_params["Trapping_frequencies"]
   wx = 2*pi*float(fx)
   wy = 2*pi*float(fy)
   wz = 2*pi*float(fz)
-  w = np.array([wx,wz,wy])
+  w = np.array([wx,wy,wz])
   omega_ho = (wx*wy*wz)**(1/3)
   # Time steps
   t_evol = sim_params["Total_simulation_time"]
@@ -221,6 +226,7 @@ def get_simulation_parameters(ConfigFilePath):
       "x_max":x_max,
       "Trapping_frequencies":sim_params["Trapping_frequencies"],
       "Potential_type":sim_params["Potential_type"],
+      "SwitchOff_time":sim_params["SwitchOff_time"],
       "w":w,
       "dx":dx,
       "dp":dp,
@@ -251,24 +257,48 @@ def get_simulation_parameters(ConfigFilePath):
     print(msg)
   return simulation_params, msg
 
+def save_parameters_to_json(parameters, filepath="simulation_parameters.json"):
+  """
+  saves the simulation parameters as a json file. This is expected to be called
+  for each simulation hence saving a json file in each simulation folder.
+  """
+  def convert(x):
+    if hasattr(x, "tolist"):  # numpy arrays have this
+        return x.tolist()
+    raise TypeError(x)
+  
+  with open(filepath, "w") as fp:
+    json.dump(parameters , fp, indent = 4, default=convert)
+
 def _check_simulation_parameters(simulation_params):
   """Performs checks of the simulation parameters
   Args: dict, the simulation parameters
   Returns: 
     ok: bool, True if the checks pass, otherwise False
-    msg: str, the fault that was detected
+    msg: str, the faults that were detected
   """
+  overallMsg = ""
   ok, msg = True, ""
+  overallMsg += msg
+  overall = ok
 
   ok, msg = _perform_grid_checks(simulation_params)
-  
+  overallMsg += msg + "\n"
+  overall = overall and ok
+
   ok, msg = _perform_frequency_checks(simulation_params)
-  
+  overallMsg += msg + "\n"
+  overall = overall and ok
+
   ok, msg = _perform_vortex_checks(simulation_params)
-  
+  overallMsg += msg + "\n"
+  overall = overall and ok
+
   ok, msg = _perform_reimprint_checks(simulation_params)
-  
-  return ok, msg
+  overallMsg += msg + "\n"
+  overall = overall and ok
+
+  return ok, overallMsg
 
 
 def _perform_grid_checks(simulation_params):
@@ -344,9 +374,10 @@ def _perform_reimprint_checks(simulation_params):
   ## Perform reimprint checks  #####
   ##################################
   sim_time = simulation_params["Total_simulation_time"] # time in sec
+  snapshots = simulation_params["shots"]
   if simulation_params["repetitive"] and (len(simulation_params["imprint_times"]) != len(simulation_params["imprinting_charge"])):
       msg = f"One list of imprinting times should be given for every simulation"
-      return True, msg
+      return False, msg
   if simulation_params["repetitive"]:
       if len(simulation_params["vortex_charge"]) != len(simulation_params["imprinting_charge"]):
           msg = f"The list number of initial charges {len(simulation_params['vortex_charge'])}, doesn't agree with the list number of imprinted {len(simulation_params['imprinting_charge'])}"
@@ -359,10 +390,13 @@ def _perform_reimprint_checks(simulation_params):
               if len(charges) != len(simulation_params["imprint_position_y"][index]):
                   msg = f"The number of imprinting charges doesn't agree with the number of y positions at index {index}"
                   return False, msg
+              if len(charges) != len(simulation_params["vortex_charge"][index]):
+                  msg = f"The number of imprinting charges doesn't agree with the number of charges at index {index}"
+                  return False, msg
       for index, times in enumerate(simulation_params["imprint_times"]):
       # check that the maximum imprint time is less than simulation time
-      # imprint times are given in ms
-          if max(times)/1000 > sim_time:
+      # imprint times are given in snapshots
+          if max(times) > snapshots:
               msg = f"The maximum imprint time is greater than the total simulation time for simulation {index+1}\n"
-              return True, msg
+              return False, msg
   return True, ""

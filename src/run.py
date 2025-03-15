@@ -1,11 +1,11 @@
-import application
+import application as ap
 import torch
 from models.system import System
 from models.simulation import Simulations
 
 def main():
     # Set up the application
-    app = application.application()
+    app = ap.application()
     DEVICE = torch.device('cuda') if torch.cuda.is_available() else 'cpu'
     app.set_device(DEVICE)
 

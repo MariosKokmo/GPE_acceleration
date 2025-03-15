@@ -6,13 +6,16 @@ import torch
 ###############################################################################
 def select_potential(potentialType, app, **simulation_parameters):
    potentialType = potentialType.strip().lower()
-   # available_potentials = {
-   #    "harmonic" : HarmonicPot(app, **simulation_parameters),
-   #    "constant" : ConstPot(app, **simulation_parameters),
-   #    "ramp" : RampPot(app, **simulation_parameters),
-   #    "rampharmonic" : RampHarmonicPot(app, **simulation_parameters),
-   #    "custom" : CustomPot(app, **simulation_parameters),
-   # }
+   available_potentials = [
+      "harmonic", 
+      "constant",
+      "ramp" ,
+      "rampharmonic",
+      "custom"
+      ]
+   if potentialType not in available_potentials:
+      raise ValueError(f"Potential type {potentialType} is not available. Available potentials are {available_potentials}")
+   
    if potentialType == "harmonic":
       return HarmonicPot(app, **simulation_parameters)
    elif potentialType == "constant":
@@ -32,6 +35,7 @@ class Potential():
       """
       self.form
       self.potential
+      self.switchOff_time
     
     def evol(self, t):
       """
@@ -44,12 +48,20 @@ class Potential():
        torch.Tensor, the potential at time t
       """
       return self.form(t) * self.potential
+    
+    def zero(self):
+      """
+      Sets the potential to zero.
+      """
+      self.potential = torch.zeros_like(self.potential)
+      return self.potential
 
 class ConstPot(Potential):
    """Constant potential across the grid"""
-   def __init__(self, amplitude, grid, device):
-      n1, n2, n3 = grid
-      self.potential = amplitude * torch.ones(n1,n2,n3, dtype=torch.double, device=device)
+   def __init__(self, app, amplitude=1.0, **kwargs):
+      self.app = app
+      n1, n2, n3 = kwargs["Grid_resolution"]
+      self.potential = amplitude * torch.ones(n1,n2,n3, dtype=torch.double, device=self.app.device)
       self.form = lambda t: 1
 
 class RampPot(Potential):
@@ -57,15 +69,17 @@ class RampPot(Potential):
    Creates a ramp potential that evolves like
    initial + (final - initial) * (t / tfinal)
    """
-   def __init__(self, initial, final, grid, tfinal, device):
-      n1, n2, n3 = grid
-      self.potential = torch.ones(n1,n2,n3, dtype=torch.double, device=device)
+   def __init__(self, app, initial=1.0, final=2.0, tfinal=1.0, **kwargs):
+      self.app = app
+      n1, n2, n3 = kwargs["Grid_resolution"]
+      self.potential = torch.ones(n1,n2,n3, dtype=torch.double, device=self.app.device)
       self.form = lambda t: (initial + (final - initial) * (t / tfinal))
 
 class HarmonicPot(Potential):
-   """Returns a harmonic potential of the form 
+    """Returns a harmonic potential of the form 
       amplitude * 1/2 * (wx*x^2 + wy*y^2 + wz*z^2)"""
-   def __init__(self, app, amplitude=1, **kwargs):
+    
+    def __init__(self, app, amplitude=1, **kwargs):
       """
       Sets the time-dependence of the potential in the `form` parameter
       and the shape of the potential in the `potential` parameter of the class.
@@ -75,23 +89,39 @@ class HarmonicPot(Potential):
       app: application,
       amplitude: float, the final value of the potential, default=1.0
       """
-      n1, n2, n3 = kwargs["Grid_resolution"]
-      x_min = kwargs["x_min"]
-      dx = kwargs["dx"]
-      w = kwargs["w"]
+      self.app = app
+      self.x_min = kwargs["x_min"]
+      self.n1, self.n2, self.n3 = kwargs["Grid_resolution"]
+      self.dx = kwargs["dx"]
+      self.w = kwargs["w"]
+      
       # Build space and momentum grids
-      x1 = x_min[0] + torch.arange(n1, dtype=torch.float64)*dx[0] # size n1
-      x2 = x_min[1] + torch.arange(n2, dtype=torch.float64)*dx[1]
-      x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
-      gx, gy, gz = torch.meshgrid(x1, x2, x3)
-      self.pot = 0.5 * amplitude * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
-      self.potential = self.pot.to(device=app.device, dtype=torch.double)
+      self.x1 = self.x_min[0] + torch.arange(self.n1, dtype=torch.float64)*self.dx[0] # size n1
+      self.x2 = self.x_min[1] + torch.arange(self.n2, dtype=torch.float64)*self.dx[1]
+      self.x3 = self.x_min[2] + torch.arange(self.n3, dtype=torch.float64)*self.dx[2]
+      
+      gx, gy, gz = torch.meshgrid(self.x1, self.x2, self.x3)
+      self.pot = 0.5 * amplitude * ((self.w[0]*gx)**2 + (self.w[1]*gy)**2 + (self.w[2]*gz)**2)
+      self.potential = self.pot.to(device=self.app.device, dtype=torch.double)
       self.form = lambda t: 1
+    
+    def zero_2D(self, amplitude=1):
+      """
+      shuts off the potential only on 2 dimensions. The 3rd dimension that is considered flat
+      is still kept.
+      Returns a new potential.
+      """ 
+      gx, gy, gz = torch.meshgrid(torch.zeros_like(self.x1), self.x2, torch.zeros_like(self.x3))
+      self.pot = 0.5 * amplitude * ((self.w[0]*gx)**2 + (self.w[1]*gy)**2 + (self.w[2]*gz)**2)
+      self.potential = self.pot.to(device=self.app.device, dtype=torch.double)
+      self.form = lambda t: 1
+      return self.potential
+
 
 class RampHarmonicPot(Potential):
    """A harmonic potential that evolves linearly in time"""
    
-   def __init__(self, tfinal, app, initial=1.0, amplitude=1.0, tinit=0.0, **kwargs):
+   def __init__(self, app, initial=1.0, amplitude=1.0, tinit=0.0, tfinal=1.0,  **kwargs):
       """
       Sets the time-dependence of the potential in the `form` parameter
       and the shape of the potential in the `potential` parameter of the class.
@@ -117,7 +147,12 @@ class RampHarmonicPot(Potential):
       self.potential = self.pot.to(device=app.device, dtype=torch.double)
       self.form = lambda t: initial + (amplitude - initial) * ((t-tinit) / (tfinal-tinit))
 
+
 class CustomPot(Potential):
+   """
+   Custom potential. The time dependence and the shape of the potential need to
+   be defined.
+   """
    def __init__(self, app, **kwargs):
       n1, n2, n3 = kwargs["Grid_resolution"]
       x_min = kwargs["x_min"]
@@ -129,6 +164,6 @@ class CustomPot(Potential):
       x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
       gx, gy, gz = torch.meshgrid(x1, x2, x3)
       self.pot = None
-      self.potential = None
+      self.potential = self.pot.to(device=app.device, dtype=torch.double)
       self.form = None
       assert (not self.pot) or (not self.potential) or (not self.form), "The potential is not configured yet."

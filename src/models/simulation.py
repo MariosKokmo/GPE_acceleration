@@ -1,6 +1,7 @@
-"""Provides the class for the simulation"""
-import utils.setup_simulations as setup_simulations
-from models.BEC import BEC
+"""Provides the class for the simulation. The simulations need a system i.e. laboratory setup
+and a BEC model i.e. condensate that will evolve."""
+import src.utils.setup_simulations as setup_simulations
+from src.models.BEC import BEC
 import os
 from pathlib import Path
 import torch
@@ -30,8 +31,8 @@ class Simulations:
 
     def run_simulations(self):
         """
-        For every simulation, it creates the BEC.
-        Runs the simulation.
+        For every simulation, it creates a new BEC.
+        Then runs the simulation.
         """
         # Run the simulations
         for combination in self.simulation_combinations:
@@ -51,6 +52,9 @@ class Simulations:
             self.logger.write(f"\n[INFO]: {self.time} -- Currently in: {os.getcwd()}\n\n")
             self.logger.write(f"[INFO]: {self.time} -- Running: {simulation_name}, started at {self.time}\n")
             
+            # save the simulation parameters as a json file
+            setup_simulations.save_parameters_to_json(self.system.simulation_parameters)
+
             # define the BEC
             self.BEC = BEC(parameters, self.system,  self.app, simulation_name)
             self.BEC.evolve()
@@ -58,7 +62,7 @@ class Simulations:
             # close the logfile
             self.app.close_logger()
             
-            # go back to the parent directory to run the next sim
+            # go back to the parent directory to prepare to run the next sim
             path = Path(os.getcwd())
             parent_path = path.parent.absolute()
             os.chdir(parent_path)
