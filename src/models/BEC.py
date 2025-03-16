@@ -176,152 +176,174 @@ class BEC:
         self.psi = gpe.update_phase(self.psi, phase)
         
     def evolve(self):
+        """
+        Evolves the BEC system over time.
+        """
         # get the parameters for easy access
-        kmax = self.system.simulation_parameters["kmax"]
-        dt = self.system.simulation_parameters["dt"]
-        omega_ho = self.system.simulation_parameters["omega_ho"]
-        shots = self.system.simulation_parameters["shots"]
-        dtau = self.system.simulation_parameters["dtau"]
-        d_x = self.system.simulation_parameters["d_x"]
-        a_ho = self.system.simulation_parameters["a_ho"]
-        p_sq = self.system.p_sq
-        p_grid = self.system.p_grid
-        x1, x2, x3 = self.system.space_axes
-        p1, p2, p3 = self.system.momentum_axes
-        uext = self.system.uext.potential
-        n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
-        u = self.system.simulation_parameters["u"]
-        rms_measurements = {}
-
-        if self.parameters["vortex_excitation"]:
-            # Vortex related
-            imprint_every = self.parameters["imprint_every"]
-            max_imprints = self.parameters["max_imprints"]
-            charges = self.parameters["vortex_charge"]
-            imprinting_charge = self.parameters["imprinting_charge"]
-            repetitive = self.parameters["repetitive"]
-            vort_x = self.parameters["vortex_position_x"]
-            vort_y = self.parameters["vortex_position_y"]
-            vort_x = np.array([vort_x])
-            vort_y = np.array([vort_y])
-            vort_charge = np.array([charges])
-            vortices = np.vstack((vort_x, vort_y, vort_charge))
-            initial_imprint_time = self.parameters["initial_imprint_time"]
-            if repetitive:
-                imprinting_charge = np.array([imprinting_charge], dtype=object)
-                imprint_times = self.parameters["imprint_times"]
-                imprint_position_x = self.parameters["imprint_position_x"]
-                imprint_position_y = self.parameters["imprint_position_y"]
-                imprint_position_x = np.array([imprint_position_x], dtype=object)
-                imprint_position_y = np.array([imprint_position_y], dtype=object)
-                imprinting_vortices_dictionary = self._create_vortex_list(imprint_position_x, imprint_position_y, imprinting_charge, imprint_times)
+        self._initialize_simulation_parameters()
 
         # initialise the BEC on the ground state
         self._initialise()
 
-        if repetitive:
+        if self.parameters["repetitive"]:
             # calculate the repetitive imprinting phase
-            self._calculate_all_phases(imprinting_vortices_dictionary)
-        
-        # evolve the BEC and perform re-imprint
-        ##############################################################################
-        ##############    MAIN LOOP OF SIMULATION    #################################
-        ##############################################################################
+            self._calculate_all_phases(self.imprinting_vortices_dictionary)
 
-        num_imprints = 0 # counts the additional imprints beyond the initial one
+        # evolve the BEC and perform re-imprint
+        self._main_simulation_loop()
+
+        # write various output files
+        self._write_simulation_outputs()
+
+    def _initialize_simulation_parameters(self):
+        """
+        Initializes simulation parameters for easy access.
+        """
+        params = self.system.simulation_parameters
+        self.kmax = params["kmax"]
+        self.dt = params["dt"]
+        self.omega_ho = params["omega_ho"]
+        self.shots = params["shots"]
+        self.dtau = params["dtau"]
+        self.d_x = params["d_x"]
+        self.a_ho = params["a_ho"]
+        self.p_sq = self.system.p_sq
+        self.p_grid = self.system.p_grid
+        self.x1, self.x2, self.x3 = self.system.space_axes
+        self.p1, self.p2, self.p3 = self.system.momentum_axes
+        self.uext = self.system.uext.potential
+        self.n1, self.n2, self.n3 = params["Grid_resolution"]
+        self.u = params["u"]
+        self.rms_measurements = {}
+        self.cross_line = torch.zeros(self.shots, self.n1)
+        self.energies = []
+
+        if self.parameters["vortex_excitation"]:
+            self._initialize_vortex_parameters()
+
+    def _initialize_vortex_parameters(self):
+        """
+        Initializes vortex-related parameters.
+        """
+        self.imprint_every = self.parameters["imprint_every"]
+        self.max_imprints = self.parameters["max_imprints"]
+        self.charges = self.parameters["vortex_charge"]
+        self.imprinting_charge = self.parameters["imprinting_charge"]
+        self.repetitive = self.parameters["repetitive"]
+        self.vort_x = np.array([self.parameters["vortex_position_x"]])
+        self.vort_y = np.array([self.parameters["vortex_position_y"]])
+        self.vort_charge = np.array([self.charges])
+        self.vortices = np.vstack((self.vort_x, self.vort_y, self.vort_charge))
+        self.initial_imprint_time = self.parameters["initial_imprint_time"]
+
+        if self.repetitive:
+            self.imprinting_charge = np.array([self.imprinting_charge], dtype=object)
+            self.imprint_times = self.parameters["imprint_times"]
+            imprint_position_x = np.array([self.parameters["imprint_position_x"]], dtype=object)
+            imprint_position_y = np.array([self.parameters["imprint_position_y"]], dtype=object)
+            self.imprinting_vortices_dictionary = self._create_vortex_list(
+                imprint_position_x, imprint_position_y, self.imprinting_charge, self.imprint_times
+            )
+
+    def _main_simulation_loop(self):
+        """
+        Main loop for evolving the BEC system.
+        """
+        num_imprints = 0
         count = 0
         initial_imprint_occured = False
-        shots_per_ms = shots // (self.system.simulation_parameters["Total_simulation_time"]*1000)
-        if repetitive:
-            imprintTime = imprint_times[num_imprints]
-            imprint_times_str = "_".join([str(round(time / shots_per_ms,2)) for time in imprint_times])
-            vortices_to_imprint = "_".join([str(key) for key in self.all_phases.keys()])
-            imprinting_charge_str = "_".join([str(charge) for charge in imprinting_charge]).replace("\n","_")
-            self.logger.write(f"[INFO]: {self.time()} -- Will imprint at the following times : {imprint_times_str}\n")
-            self.logger.write(f"[INFO]: {self.time()} -- Will imprint the following (x,y,charges) : {vortices_to_imprint}\n")
-            SimulationName=f'{len(vort_x)}vortex__initCharge{vort_charge[0]}__imprintCharge{imprinting_charge_str}__times{imprint_times_str}'
-        else:
-            SimulationName=self.simulation_name
+        shots_per_ms = self.shots // (self.system.simulation_parameters["Total_simulation_time"] * 1000)
 
-        # create storage for the line cross sections
-        cross_line = torch.zeros(shots, n1)
+        if self.repetitive:
+            imprintTime = self.imprint_times[num_imprints]
+            self._log_repetitive_imprint_info(shots_per_ms)
 
-        # create storage for the energy allocation
-        energies = []
+        for iteration in range(self.kmax):
+            t = self.dt * iteration * self.omega_ho
+            utot = self.u * torch.abs(self.psi) ** 2 + self.uext
 
-        for iteration in range(kmax):
-            t = dt*iteration*omega_ho
-            utot = u*torch.abs(self.psi)**2 + uext # Total potential shape (n1,n2,n3)
-
-            # write data file
-            if (iteration%(kmax//shots) == 0):
-                # Write some data
-                rw.write_data(self.psi, count, x1, x3, n1, n3, a_ho)
-                if self.app.phase_imaging:
-                    cur_phase = self._extract_phase()
-                    rw.save_figure_phase(cur_phase, count)
-                rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
-                rms_measurements[count] = rms
-
-                cross_line[count,:] = gpe.calculate_cross_section_line(self.psi)
-
-                energies.append(gpe.calculate_energy_allocation(self.psi, uext, p_grid, {'u': u}))
-
+            if iteration % (self.kmax // self.shots) == 0:
+                self._write_iteration_data(count, t)
                 count += 1
-                self.logger.write(f"t = {t/omega_ho}\n")
-            
-            # Perform the initial imprint
-            if (iteration == ((kmax//shots)*initial_imprint_time)) and (not initial_imprint_occured):
-                # imprint the topological excitation for the first time
-                self.logger.write(f"[INFO]: {self.time()} -- Imprinting the initial topological object\n")
-                self._imprint_vortices(vortices)
+
+            if iteration == (self.kmax // self.shots) * self.initial_imprint_time and not initial_imprint_occured:
+                self._perform_initial_imprint()
                 initial_imprint_occured = True
 
-            # repetitive imprinting with possibly different phases
-            if repetitive and (iteration == (kmax//shots)*imprintTime) and (num_imprints < max_imprints):
-                vortex_array = imprinting_vortices_dictionary[imprintTime]
-                x = tuple(vortex_array[0])
-                y = tuple(vortex_array[1])
-                charge = tuple(vortex_array[2])
-                key_for_phase = (x,y,charge)
-                # extract the phase to imprint
-                phaseImp = self.all_phases[key_for_phase]
-                print("Imprinting again...")
-                self.logger.write(f"[INFO]: {self.time()} -- Imprinting again...{key_for_phase}\n")
-                self._repetitive_imprint(phaseImp)
+            if self.repetitive and iteration == (self.kmax // self.shots) * imprintTime and num_imprints < self.max_imprints:
+                self._perform_repetitive_imprint(num_imprints)
                 num_imprints += 1
-                if (num_imprints < max_imprints) and (num_imprints < len(imprint_times)):# to avoid out-of-bounds index
-                    imprintTime = imprint_times[num_imprints]
+                if num_imprints < self.max_imprints and num_imprints < len(self.imprint_times):
+                    imprintTime = self.imprint_times[num_imprints]
 
-            # if the time is greater than the switchOff_time, turn off potential
-            if (iteration >= (kmax//shots) * self.system.uext.switchOff_time) and (not self.reset_potential):
-                self.logger.write(f"[INFO]: {self.time()} -- External potential set to zero\n")
-                uext = self.system.uext.zero()
-                self.reset_potential = True
-            
-            # split-step evolution
-            self._step(utot, dtau, p_sq, d_x)
-        
-        ###############################################################
-        ##############    WRITE VARIOUS FILES   #######################
-        ###############################################################
-        # Write the RMS measurements in a file
-        rw.write_rms(rms_measurements, SimulationName)
-        rw.save_rms_figure(f'{SimulationName}_RMS_meas.txt')
+            if iteration >= (self.kmax // self.shots) * self.system.uext.switchOff_time and not self.reset_potential:
+                self._turn_off_potential()
 
-        # save the cross sections in figure and file
-        rw.save_cross_section_line_figure(cross_line)
-        rw.save_tensor_to_csv(cross_line, "cross_line_density.csv")
+            self._step(utot, self.dtau, self.p_sq, self.d_x)
 
-        # write the energies
-        rw.write_energy_terms(energies, "energies.txt")
-        
-        # create the full video
-        video_creation.create_video(count=count,\
-                        simulation_name=SimulationName,\
-                        n1=n1,n3=n3
-                        )
+    def _log_repetitive_imprint_info(self, shots_per_ms):
+        """
+        Logs information about repetitive imprinting.
+        """
+        imprint_times_str = "_".join([str(round(time / shots_per_ms, 2)) for time in self.imprint_times])
+        vortices_to_imprint = "_".join([str(key) for key in self.all_phases.keys()])
+        imprinting_charge_str = "_".join([str(charge) for charge in self.imprinting_charge]).replace("\n", "_")
+        self.logger.write(f"[INFO]: {self.time()} -- Will imprint at the following times : {imprint_times_str}\n")
+        self.logger.write(f"[INFO]: {self.time()} -- Will imprint the following (x,y,charges) : {vortices_to_imprint}\n")
+        self.simulation_name=f'{len(self.vort_x)}vortex__initCharge{self.vort_charge[0]}__imprintCharge{imprinting_charge_str}__times{imprint_times_str}'
+
+    def _write_iteration_data(self, count, t):
+        """
+        Writes data for the current iteration.
+        """
+        rw.write_data(self.psi, count, self.x1, self.x3, self.n1, self.n3, self.a_ho)
+        if self.app.phase_imaging:
+            cur_phase = self._extract_phase()
+            rw.save_figure_phase(cur_phase, count)
+        rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
+        self.rms_measurements[count] = rms
+        self.cross_line[count, :] = gpe.calculate_cross_section_line(self.psi)
+        self.energies.append(gpe.calculate_energy_allocation(self.psi, self.uext, self.p_grid, {"u": self.u}))
+        self.logger.write(f"t = {t / self.omega_ho}\n")
+
+    def _perform_initial_imprint(self):
+        """
+        Performs the initial imprint of vortices.
+        """
+        self.logger.write(f"[INFO]: {self.time()} -- Imprinting the initial topological object\n")
+        self._imprint_vortices(self.vortices)
+
+    def _perform_repetitive_imprint(self, num_imprints):
+        """
+        Performs repetitive imprinting with possibly different phases.
+        """
+        vortex_array = self.imprinting_vortices_dictionary[self.imprint_times[num_imprints]]
+        x = tuple(vortex_array[0])
+        y = tuple(vortex_array[1])
+        charge = tuple(vortex_array[2])
+        key_for_phase = (x, y, charge)
+        phaseImp = self.all_phases[key_for_phase]
+        self.logger.write(f"[INFO]: {self.time()} -- Imprinting again...{key_for_phase}\n")
+        self._repetitive_imprint(phaseImp)
+
+    def _turn_off_potential(self):
+        """
+        Turns off the external potential.
+        """
+        self.logger.write(f"[INFO]: {self.time()} -- External potential set to zero\n")
+        self.uext = self.system.uext.zero()
+        self.reset_potential = True
+
+    def _write_simulation_outputs(self):
+        """
+        Writes various output files after the simulation.
+        """
+        SimulationName = self.simulation_name
+        rw.write_rms(self.rms_measurements, SimulationName)
+        rw.save_rms_figure(f"{SimulationName}_RMS_meas.txt")
+        rw.save_cross_section_line_figure(self.cross_line)
+        rw.save_tensor_to_csv(self.cross_line, "cross_line_density.csv")
+        rw.write_energy_terms(self.energies, "energies.txt")
+        video_creation.create_video(count=len(self.rms_measurements), simulation_name=SimulationName, n1=self.n1, n3=self.n3)
         if self.app.write_velocity:
-            video_creation.create_velocity_video(count,\
-                                                    SimulationName,\
-                                                    n1,n3)
+            video_creation.create_velocity_video(len(self.rms_measurements), SimulationName, self.n1, self.n3)
