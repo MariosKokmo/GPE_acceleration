@@ -9,6 +9,7 @@ sys.path.append(".")
 from src.utils.setup_simulations import _perform_vortex_checks
 from src.utils.setup_simulations import _perform_reimprint_checks
 from src.utils.setup_simulations import save_parameters_to_json
+from src.utils.setup_simulations import _perform_grid_checks
 
 
 class TestPerformVortexChecks(unittest.TestCase):
@@ -278,6 +279,54 @@ class TestSaveParametersToJson(unittest.TestCase):
 
         with self.assertRaises(TypeError):
             save_parameters_to_json(parameters, filepath=self.test_file)
+
+class TestPerformGridChecks(unittest.TestCase):
+
+    def test_valid_grid(self):
+        simulation_params = {
+            "x_min": [-10, -10, -10],
+            "x_max": [10, 10, 10],
+            "Grid_resolution": [100, 100, 100]
+        }
+        ok, msg = _perform_grid_checks(simulation_params)
+        self.assertTrue(ok)
+        self.assertEqual(msg, "")
+
+    def test_x_min_not_negative(self):
+        simulation_params = {
+            "x_min": [10, -10, -10],
+            "x_max": [10, 10, 10],
+            "Grid_resolution": [100, 100, 100]
+        }
+        ok, msg = _perform_grid_checks(simulation_params)
+        self.assertFalse(ok)
+        self.assertIn("x_min for axis 1 is not negative", msg)
+
+    def test_grid_not_symmetric(self):
+        simulation_params = {
+            "x_min": [-10, -10, -5],
+            "x_max": [10, 10, 10],
+            "Grid_resolution": [100, 100, 100]
+        }
+        ok, msg = _perform_grid_checks(simulation_params)
+        self.assertFalse(ok)
+        self.assertIn("3 max and min are not symmetric", msg)
+
+    def test_grid_resolution_zero(self):
+        simulation_params = {
+            "x_min": [-10, -10, -10],
+            "x_max": [10, 10, 10],
+            "Grid_resolution": [100, 0, 100]
+        }
+        ok, msg = _perform_grid_checks(simulation_params)
+        self.assertFalse(ok)
+        self.assertIn("The grid resolution must be greater than zero", msg)
+
+    def test_invalid_simulation_params_type(self):
+        simulation_params = [(-10, -10, -10), (10, 10, 10), (100, 100, 100)]  # Not a dictionary
+        with self.assertRaises(TypeError) as context:
+            _perform_grid_checks(simulation_params)
+        self.assertIn("simulation_params must be a dictionary", str(context.exception))
 
 if __name__ == "__main__":
     unittest.main()

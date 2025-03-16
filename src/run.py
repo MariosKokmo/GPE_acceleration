@@ -1,7 +1,7 @@
-import application as ap
+import src.application as ap
 import torch
-from models.system import System
-from models.simulation import Simulations
+from src.models.system import System
+from src.models.simulation import Simulations
 
 def main():
     # Set up the application

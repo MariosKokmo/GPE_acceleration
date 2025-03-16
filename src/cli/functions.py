@@ -3,7 +3,7 @@ import json
 from src.utils.setup_simulations import _check_simulation_parameters, get_simulation_parameters
 from src.run import main as run_code
 
-def validate_config(verbose, config_path):
+def validate_config(config_path, verbose):
     """
     Validates the configuration file for the simulation.
 
@@ -31,7 +31,14 @@ def validate_config(verbose, config_path):
     if verbose > 1:
         print(f"[DEBUG] Loaded configuration: {config_path}")
 
-    params = get_simulation_parameters(config_path)
+    params, msg = get_simulation_parameters(config_path)
+    if verbose > 0:
+        print(f"[INFO] {msg}")
+
+    # Ensure params is a dictionary
+    if not isinstance(params, dict):
+        raise ValueError("Configuration parameters must be a dictionary.")
+
     # Validate the configuration using functions from setup_simulations.py
     try:
         ok, msg =_check_simulation_parameters(params)

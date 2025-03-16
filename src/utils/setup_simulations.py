@@ -13,7 +13,7 @@ def _read_configuration_file(ConfigFile):
   Args: str, the path to the file
   Returns: dictionary, the contents of the configuration file
   """
-  cwd = os.getcwd()
+  cwd = os.getcwd()  
   print(cwd)
   pathConfigFile = cwd + "/" + ConfigFile
   try:
@@ -302,25 +302,32 @@ def _check_simulation_parameters(simulation_params):
 
 
 def _perform_grid_checks(simulation_params):
-  ###################################
-  ####### Perform grid checks #######
-  ###################################
-  # the minimums should be negative
-  for index, x in enumerate(simulation_params["x_min"]):
-      if x > 0:
-          msg = f"x_min for axis {index+1} is not negative. Grid is assumed symmetric."
-          return False, msg
-  # the grid should be symmetric
-  xmins = simulation_params["x_min"]
-  xmaxs = simulation_params["x_max"]
-  for index, x_min in enumerate(xmins):
-      if abs(x_min) != abs(xmaxs[index]):
-          msg = f"{index+1} max and min are not symmetric. Grid is assumed symmetric."
-          return False, msg
-  if min(simulation_params["Grid_resolution"])<= 0:
-      msg = f"The grid resolution must be greater than zero"
-      return False, msg
-  return True, ""
+    ###################################
+    ####### Perform grid checks #######
+    ###################################
+    # Ensure simulation_params is a dictionary
+    if not isinstance(simulation_params, dict):
+        raise TypeError("simulation_params must be a dictionary")
+
+    # The minimums should be negative
+    for index, x in enumerate(simulation_params["x_min"]):
+        if x > 0:
+            msg = f"x_min for axis {index+1} is not negative. Grid is assumed symmetric."
+            return False, msg
+
+    # The grid should be symmetric
+    xmins = simulation_params["x_min"]
+    xmaxs = simulation_params["x_max"]
+    for index, x_min in enumerate(xmins):
+        if abs(x_min) != abs(xmaxs[index]):
+            msg = f"{index+1} max and min are not symmetric. Grid is assumed symmetric."
+            return False, msg
+
+    if min(simulation_params["Grid_resolution"]) <= 0:
+        msg = f"The grid resolution must be greater than zero"
+        return False, msg
+
+    return True, ""
   
 def _perform_frequency_checks(simulation_params):
   ##################################
