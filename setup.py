@@ -27,11 +27,16 @@ setup(
     packages=find_packages(where='src', 
                            include=["src*"],
                            ),
+    entry_points={
+        "console_scripts": [
+            "gpeu=src.cli.gpeu:main",
+        ],
+    },
     include_package_data=True,
     install_requires=[
         'matplotlib>=3.7.1,<4',
-        'numpy==1.23.5', 
-        'pandas==1.5.3',
+        'numpy>=1.23.5,<1.3', 
+        'pandas>=1.5.3,<1.6',
         'torch==2.1.0+cu118'
         ],
     python_requires='>=3.7',

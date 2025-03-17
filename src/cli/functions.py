@@ -51,5 +51,24 @@ def validate_config(config_path, verbose):
         else:
             print(msg)
 
+def check_args(args):
+    """
+    Validates the command-line arguments.
+    """
+    # Check if config file exists
+    if not os.path.exists(args.config):
+        raise FileNotFoundError(f"Configuration file '{args.config}' does not exist.")
+
+    # Check if app file exists
+    if not os.path.exists(args.app):
+        raise FileNotFoundError(f"Application file '{args.app}' does not exist.")
+
+    # Ensure --run is only executed if --check is passed
+    if args.run and not args.check:
+        raise ValueError("The '--run' flag requires '--check' to be executed first.")
+
+    if args.verbose > 1:
+        print("[DEBUG] Arguments validated successfully.")
+
 def run_simulations():
     run_code()

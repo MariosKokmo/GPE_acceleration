@@ -1,6 +1,6 @@
 import argparse
 import os
-from src.cli.functions import validate_config, run_simulations
+from src.cli.functions import validate_config, run_simulations, check_args
 
 def main():
     parser = argparse.ArgumentParser(description="GPU accelerated code for GPE systems.")
@@ -27,24 +27,6 @@ def main():
             print("[INFO] Running simulations...")
         run_simulations()
 
-def check_args(args):
-    """
-    Validates the command-line arguments.
-    """
-    # Check if config file exists
-    if not os.path.exists(args.config):
-        raise FileNotFoundError(f"Configuration file '{args.config}' does not exist.")
-
-    # Check if app file exists
-    if not os.path.exists(args.app):
-        raise FileNotFoundError(f"Application file '{args.app}' does not exist.")
-
-    # Ensure --run is only executed if --check is passed
-    if args.run and not args.check:
-        raise ValueError("The '--run' flag requires '--check' to be executed first.")
-
-    if args.verbose > 1:
-        print("[DEBUG] Arguments validated successfully.")
 
 if __name__ == "__main__":
     main()
