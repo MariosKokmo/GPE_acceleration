@@ -3,11 +3,11 @@ import os
 import sys
 sys.path.append('.')
 from unittest.mock import patch
-from src.cli.gpeu import main
+from src.cli.baqs import main
 from unittest.mock import MagicMock
 from src.cli.functions import check_args
 
-class TestGPEU(unittest.TestCase):
+class TestBAQS(unittest.TestCase):
 
     def test_main_with_valid_args(self):
         """
@@ -20,7 +20,7 @@ class TestGPEU(unittest.TestCase):
 
         # Mock command-line arguments
         test_args = [
-            "gpeu.py",
+            "baqs.py",
             config_file,
             app_file,
             "--check",
@@ -33,7 +33,7 @@ class TestGPEU(unittest.TestCase):
     def test_main_missing_config(self):
         # Mock command-line arguments with a missing config file
         test_args = [
-            "gpeu.py",
+            "baqs.py",
             "missing_config.json",
             "app.json",
             "--check"
@@ -50,7 +50,7 @@ class TestGPEU(unittest.TestCase):
         try:
             # Mock command-line arguments with a missing app file
             test_args = [
-                "gpeu.py",
+                "baqs.py",
                 config_file,
                 "missing_app.json",
                 "--check"
@@ -73,7 +73,7 @@ class TestGPEU(unittest.TestCase):
         try:
             # Mock command-line arguments with --run but without --check
             test_args = [
-                "gpeu.py",
+                "baqs.py",
                 config_file,
                 app_file,
                 "--run"
