@@ -1,5 +1,6 @@
 {
     "logfile":"log.txt",
+    "configFile":"configuration_file.json",
     "write_velocity":false,
     "phase_imaging":false
 }

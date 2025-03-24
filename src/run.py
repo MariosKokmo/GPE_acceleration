@@ -3,7 +3,7 @@ import torch
 from src.models.system import System
 from src.models.simulation import Simulations
 
-def main():
+def main(configFile="configuration_file.json"):
     # Set up the application
     app = ap.application()
     DEVICE = torch.device('cuda') if torch.cuda.is_available() else 'cpu'

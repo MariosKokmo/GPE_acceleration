@@ -8,6 +8,7 @@ class System:
         self.app = app
         self.device = self.app.device
         self.logger = self.app.open_logger()
+        self.configFile = self.app.configFile
         self.time = app.time
         self.space_axes = None
         self.momentum_axes = None
@@ -33,7 +34,7 @@ class System:
             raise Exception("Device needs to be set before the system")
         if not self.logger:
             raise Exception("Logger needs to be set before the system")
-        self.simulation_parameters, fault = setup_simulations.get_simulation_parameters("configuration_file.json")
+        self.simulation_parameters, fault = setup_simulations.get_simulation_parameters(self.configFile)
         
         if fault:
             self.logger.write("[FATAL]: {} -- {}".format(self.time(), fault))
@@ -42,6 +43,7 @@ class System:
         # define the external potential
         potentialType = self.simulation_parameters["Potential_type"]
         new_potential = select_potential(potentialType, self.app, **self.simulation_parameters)
+        
         if not new_potential:
             self.logger.write("[FATAL]: {} -- Potential was not selected".format(self.time()))
             self.app.close_logger()

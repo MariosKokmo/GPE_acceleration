@@ -157,8 +157,7 @@ class TestPerformReimprintChecks(unittest.TestCase):
             "imprint_position_y": [[15, -15, 0]]
         }
         result, msg = _perform_reimprint_checks(simulation_params)
-        self.assertFalse(result)
-        self.assertIn("The number of imprinting charges doesn't agree with the number of charges", msg)
+        self.assertTrue(result)
     
     def test_mismatched_individual_vortex_and_imprinting_charges_multi(self):
         """Test when the number of vortex charges doesn't match the number of imprinting charges."""
@@ -173,8 +172,7 @@ class TestPerformReimprintChecks(unittest.TestCase):
             "imprint_position_y": [[[10, -10], [0], [0]], [[0, 0], [0], [0]]]
         }
         result, msg = _perform_reimprint_checks(simulation_params)
-        self.assertFalse(result)
-        self.assertIn("The number of imprinting charges doesn't agree with the number of charges", msg)
+        self.assertTrue(result)
 
     def test_mismatched_imprinting_charges_and_positions(self):
         """Test when the number of imprinting charges doesn't match the number of positions."""

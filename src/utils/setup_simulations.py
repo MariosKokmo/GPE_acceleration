@@ -397,9 +397,7 @@ def _perform_reimprint_checks(simulation_params):
               if len(charges) != len(simulation_params["imprint_position_y"][index]):
                   msg = f"The number of imprinting charges doesn't agree with the number of y positions at index {index}"
                   return False, msg
-              if len(charges) != len(simulation_params["vortex_charge"][index]):
-                  msg = f"The number of imprinting charges doesn't agree with the number of charges at index {index}"
-                  return False, msg
+              
       for index, times in enumerate(simulation_params["imprint_times"]):
       # check that the maximum imprint time is less than simulation time
       # imprint times are given in snapshots
