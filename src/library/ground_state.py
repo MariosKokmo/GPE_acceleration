@@ -4,8 +4,8 @@ propagation method. """
 import numpy as np
 import pandas as pd
 import torch
-from src.library.gpe_library import normalize, init_grid
-from src.library.gpe_library import CONSTANTS
+from src.library.gpe_library import GPELibrary as gpe
+from src.library.parameters import CONSTANTS
 from src.utils.read_write_utils import write_psi
 
 class GroundState:
@@ -38,7 +38,7 @@ class GroundState:
         psi1 = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=device)
 
         uext = system.uext.potential
-        x1, x2, x3, p1, p2, p3, p_sq, _, _ = init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device)
+        x1, x2, x3, p1, p2, p3, p_sq, _, _ = gpe.init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device)
         energy = 0
         energy_old = 0
         iter = 0
@@ -50,7 +50,7 @@ class GroundState:
         mu_TF = 0.5 * (15/(4 * CONSTANTS.pi) * u)**(2/5)
 
         psi1 = torch.where(mu_TF > uext, torch.sqrt(mu_TF - uext) + 0j, psi1)
-        psi1 = normalize(psi1, d_x)
+        psi1 = gpe.normalize(psi1, d_x)
 
         psi1, energy, tol, mu= GroundState.steepest_descent(psi1, dtau, p_sq, uext, d_x, u)
         print("{iter}\t{energy}\t{mu}\t{dtau:}\t{tol}".format(iter="iter",energy="energy",mu="mu",dtau="dtau",tol="tol"))
@@ -110,7 +110,7 @@ class GroundState:
 
         energy = mu - interaction
         psi = psi - dtau * dpsi
-        psi = normalize(psi, d_x)
+        psi = gpe.normalize(psi, d_x)
 
         return psi, energy, tol, mu
 
