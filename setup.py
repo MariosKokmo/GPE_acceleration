@@ -21,7 +21,7 @@ def find_version(*file_paths):
 setup(
     author="Marios Kokmotos",
     description="",
-    name="",
+    name="baqs",
     version=find_version('src','__version__.py'),
     package_dir={"": "src"},
     packages=find_packages(where='src', 
@@ -29,7 +29,7 @@ setup(
                            ),
     entry_points={
         "console_scripts": [
-            "gpeu=src.cli.gpeu:main",
+            "gpeu=src.cli.baqs:main",
         ],
     },
     include_package_data=True,
