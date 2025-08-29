@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import sys
 sys.path.append('.')
-from src.library import gpe_library as gpe
+from src.library.gpe_library import GPELibrary as gpe
 
 
 class TestModGradPsi(unittest.TestCase):
