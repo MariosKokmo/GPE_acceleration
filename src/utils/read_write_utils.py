@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import pandas as pd
 import matplotlib.pyplot as plt
-from src.library.gpe_library import calculate_velocity2D
+from src.library.gpe_library import GPE2DLibrary as gpe2d
 
 def write_psi(file_name, psi, n1, n2, n3):
     """
@@ -109,7 +109,7 @@ def write_velocity2D(phase, count, x1, x3, n1, n2, n3, a_ho, p_grid):
     """
     j = n2//2
     vel_file_name = f'V-{count:003}-cd.dat'
-    velocity_mag, veloc_phase = calculate_velocity2D(phase, p_grid)
+    velocity_mag, veloc_phase = gpe2d.calculate_velocity2D(phase, p_grid)
     with open(vel_file_name, 'w') as f:
         for i in range(n1):
             for k in range(n3):

@@ -4,6 +4,7 @@ import torch
 import sys
 sys.path.append('.')
 from src.library.gpe_library import GPELibrary as gpe
+from src.library.gpe_library import GPE2DLibrary as gpe2d
 
 
 class TestModGradPsi(unittest.TestCase):
@@ -170,20 +171,20 @@ class TestCreateVortices(unittest.TestCase):
 
     def test_create_vortices_single(self):
         """Tests the creation of a single vortex"""
-        phase = gpe.create_vortices(self.vortices, self.x1, self.x2, self.x3, self.N1, self.N2, self.N3, self.device)
+        phase = gpe2d.create_vortices(self.vortices, self.x1, self.x2, self.x3, self.N1, self.N2, self.N3, self.device)
         self.assertEqual(phase.shape, (self.N1, self.N2, self.N3), "Phase tensor shape mismatch")
         self.assertTrue(torch.is_tensor(phase), "Phase is not a tensor")
         self.assertTrue(torch.all(torch.isfinite(phase)), "Phase contains NaN or Inf values")
 
     def test_create_vortices_none(self):
         """Tests the behavior when no vortices are provided"""
-        phase = gpe.create_vortices(None, self.x1, self.x2, self.x3, self.N1, self.N2, self.N3, self.device)
+        phase = gpe2d.create_vortices(None, self.x1, self.x2, self.x3, self.N1, self.N2, self.N3, self.device)
         self.assertIsNone(phase, "Phase should be None when no vortices are provided")
 
     def test_create_vortices_multiple(self):
         """Tests the creation of multiple vortices"""
         vortices = np.array([[0, 5], [0, -5], [1, -1]])  # Two vortices with different charges
-        phase = gpe.create_vortices(vortices, self.x1, self.x2, self.x3, self.N1, self.N2, self.N3, self.device)
+        phase = gpe2d.create_vortices(vortices, self.x1, self.x2, self.x3, self.N1, self.N2, self.N3, self.device)
         self.assertEqual(phase.shape, (self.N1, self.N2, self.N3), "Phase tensor shape mismatch")
         self.assertTrue(torch.is_tensor(phase), "Phase is not a tensor")
         self.assertTrue(torch.all(torch.isfinite(phase)), "Phase contains NaN or Inf values")
@@ -205,6 +206,127 @@ class TestXEvolution(unittest.TestCase):
 
         # Assert the result is close to the expected output
         self.assertTrue(torch.allclose(result, expected_output, atol=1e-6))
+
+
+class TestCalculateDensityPeak(unittest.TestCase):
+    def test_density_peak_simple(self):
+        """Test with a simple 3D wavefunction where peak is known"""
+        # Create a simple 3D wavefunction with known peak
+        psi = torch.zeros((5, 5, 5), dtype=torch.cdouble)
+        psi[2, 3, 1] = 5.0 + 0.0j  # Maximum at position (2, 3, 1)
+        psi[1, 1, 1] = 2.0 + 0.0j
+        psi[3, 3, 3] = 1.0 + 0.0j
+        
+        max_density, peak_indices = gpe2d.calculate_density_peak(psi)
+        
+        # Check that max_density is correct (|5.0|^2 = 25.0)
+        self.assertAlmostEqual(max_density.item(), 25.0, places=6)
+        
+        # Check that peak_indices is correct
+        self.assertEqual(peak_indices, (2, 3, 1))
+    
+    def test_density_peak_complex(self):
+        """Test with complex wavefunction"""
+        psi = torch.zeros((4, 4, 4), dtype=torch.cdouble)
+        psi[1, 2, 3] = 3.0 + 4.0j  # |3+4j|^2 = 25
+        psi[0, 0, 0] = 2.0 + 1.0j  # |2+1j|^2 = 5
+        
+        max_density, peak_indices = gpe2d.calculate_density_peak(psi)
+        
+        # Check that max_density is correct
+        self.assertAlmostEqual(max_density.item(), 25.0, places=6)
+        
+        # Check that peak_indices is correct
+        self.assertEqual(peak_indices, (1, 2, 3))
+    
+    def test_density_peak_gaussian(self):
+        """Test with a Gaussian-like distribution"""
+        # Create a 3D Gaussian centered at (5, 5, 5)
+        x = torch.arange(11, dtype=torch.float64)
+        y = torch.arange(11, dtype=torch.float64)
+        z = torch.arange(11, dtype=torch.float64)
+        X, Y, Z = torch.meshgrid(x, y, z)
+        
+        # Gaussian centered at (5, 5, 5)
+        psi = torch.exp(-((X - 5)**2 + (Y - 5)**2 + (Z - 5)**2) / 2.0)
+        psi = psi.type(torch.cdouble)
+        
+        max_density, peak_indices = gpe2d.calculate_density_peak(psi)
+        
+        # The peak should be at the center (5, 5, 5)
+        self.assertEqual(peak_indices, (5, 5, 5))
+        
+        # The maximum density should be 1.0 (exp(0) = 1)
+        self.assertAlmostEqual(max_density.item(), 1.0, places=6)
+    
+    def test_density_peak_corner(self):
+        """Test when peak is at corner of grid"""
+        psi = torch.zeros((10, 10, 10), dtype=torch.cdouble)
+        psi[0, 0, 0] = 7.0 + 0.0j  # Peak at corner
+        psi[5, 5, 5] = 3.0 + 0.0j
+        
+        max_density, peak_indices = gpe2d.calculate_density_peak(psi)
+        
+        self.assertAlmostEqual(max_density.item(), 49.0, places=6)
+        self.assertEqual(peak_indices, (0, 0, 0))
+    
+    def test_density_peak_edge(self):
+        """Test when peak is at edge but not corner"""
+        psi = torch.zeros((8, 8, 8), dtype=torch.cdouble)
+        psi[0, 4, 7] = 6.0 + 0.0j  # Peak at edge
+        psi[4, 4, 4] = 2.0 + 0.0j
+        
+        max_density, peak_indices = gpe2d.calculate_density_peak(psi)
+        
+        self.assertAlmostEqual(max_density.item(), 36.0, places=6)
+        self.assertEqual(peak_indices, (0, 4, 7))
+    
+    def test_density_peak_uniform(self):
+        """Test when all values are equal"""
+        psi = torch.ones((6, 6, 6), dtype=torch.cdouble) * 2.0
+        
+        max_density, peak_indices = gpe2d.calculate_density_peak(psi)
+        
+        # All densities are 4.0
+        self.assertAlmostEqual(max_density.item(), 4.0, places=6)
+        # Should return the first occurrence (0, 0, 0)
+        self.assertEqual(peak_indices, (0, 0, 0))
+    
+    def test_density_peak_large_tensor(self):
+        """Test with a larger tensor to verify unravel_index logic"""
+        psi = torch.zeros((20, 30, 40), dtype=torch.cdouble)
+        psi[15, 25, 35] = 10.0 + 0.0j  # Peak at specific position
+        
+        max_density, peak_indices = gpe2d.calculate_density_peak(psi)
+        
+        self.assertAlmostEqual(max_density.item(), 100.0, places=6)
+        self.assertEqual(peak_indices, (15, 25, 35))
+    
+    def test_density_peak_negative_values(self):
+        """Test that density is always positive (magnitude squared)"""
+        psi = torch.zeros((5, 5, 5), dtype=torch.cdouble)
+        psi[2, 2, 2] = -5.0 + 0.0j  # Negative real part
+        psi[1, 1, 1] = 3.0 + 0.0j
+        
+        max_density, peak_indices = gpe2d.calculate_density_peak(psi)
+        
+        # |-5|^2 = 25, which is greater than |3|^2 = 9
+        self.assertAlmostEqual(max_density.item(), 25.0, places=6)
+        self.assertEqual(peak_indices, (2, 2, 2))
+    
+    def test_density_peak_multiple_complex(self):
+        """Test with multiple complex values"""
+        psi = torch.zeros((7, 7, 7), dtype=torch.cdouble)
+        psi[1, 2, 3] = 2.0 + 2.0j   # |2+2j|^2 = 8
+        psi[3, 3, 3] = 1.0 + 2.0j   # |1+2j|^2 = 5
+        psi[5, 5, 5] = 2.0 + 1.0j   # |2+1j|^2 = 5
+        psi[4, 4, 4] = 3.0 + 0.0j   # |3|^2 = 9
+        
+        max_density, peak_indices = gpe2d.calculate_density_peak(psi)
+        
+        self.assertAlmostEqual(max_density.item(), 9.0, places=6)
+        self.assertEqual(peak_indices, (4, 4, 4))
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=3)

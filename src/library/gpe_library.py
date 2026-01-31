@@ -264,7 +264,34 @@ class GPELibrary:
             'e_int': e_int,
             'E_total': E_total
         }
+    
+    @staticmethod
+    def calculate_density_peak(
+        psi: torch.Tensor
+    ) -> tuple:
+        """
+        Calculate the maximum density and its position in the wavefunction.
 
+        Args:
+            psi (torch.Tensor): BEC normalised wavefunction.
+
+        Returns:
+            tuple: (max_density, peak_indices) where max_density is a scalar tensor
+                   and peak_indices is a tuple of integers (i, j, k) representing
+                   the grid position of the maximum density.
+        """
+        density = torch.abs(psi) ** 2
+        density_flat = density.flatten()
+        peak_position = torch.argmax(density_flat).item()
+        max_density = density_flat[peak_position]
+        
+        # Manual unravel_index for 3D tensor
+        shape = density.shape
+        k = peak_position % shape[2]
+        j = (peak_position // shape[2]) % shape[1]
+        i = peak_position // (shape[2] * shape[1])
+        
+        return max_density, (i, j, k)
 
 class GPE2DLibrary(GPELibrary):
     @staticmethod
@@ -395,4 +422,3 @@ class GPE2DLibrary(GPELibrary):
         elif axis == 2:
             return torch.sum(torch.abs(psi[:, :, n3 // 2]) ** 2, dim=0)
         return None
-

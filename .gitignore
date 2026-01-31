@@ -1,2 +1,5 @@
 experimental/
 .vscode/
+venv/
+__pycache__/
+.venv

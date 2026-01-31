@@ -2,7 +2,8 @@
 Provides the BEC class.
 Once a BEC object is initialised, its evolution can be run.
 """
-import src.library.gpe_library as gpe
+from src.library.gpe_library import GPELibrary as gpe
+from src.library.gpe_library import GPE2DLibrary as gpe2d
 import src.library.ground_state as gs
 import src.utils.read_write_utils as rw
 from src.utils import video_creation
@@ -254,6 +255,10 @@ class BEC:
         initial_imprint_occured = False
         shots_per_ms = self.shots // (self.system.simulation_parameters["Total_simulation_time"] * 1000)
 
+        # Open density evolution file
+        density_file = open("density_evolution.txt", "w")
+        density_file.write("count\ttime\tmax_density\tpeak_indices\n")
+
         if self.repetitive:
             imprintTime = self.imprint_times[num_imprints]
             self._log_repetitive_imprint_info(shots_per_ms)
@@ -279,7 +284,15 @@ class BEC:
             if iteration >= (self.kmax // self.shots) * self.system.uext.switchOff_time and not self.reset_potential:
                 self._turn_off_potential()
 
+            # Calculate density peak between count 148 and 190
+            if 148 <= count <= 190:
+                max_density, peak_indices = gpe.calculate_density_peak(self.psi)
+                density_file.write(f"{count}\t{t / self.omega_ho}\t{max_density.item():.6e}\t{peak_indices}\n")
+
             self._step(utot, self.dtau, self.p_sq, self.d_x)
+
+        # Close density evolution file
+        density_file.close()
 
     def _log_repetitive_imprint_info(self, shots_per_ms):
         """
