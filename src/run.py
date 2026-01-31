@@ -9,9 +9,7 @@ def main(configFile="configuration_file.json"):
     DEVICE = torch.device('cuda') if torch.cuda.is_available() else 'cpu'
     app.set_device(DEVICE)
 
-    app.open_logger()
-    app.logger.write(f"[INFO]: {app.time()} -- Running on {DEVICE}.\n")
-    app.close_logger()
+    app.logger.info(f"Running on {DEVICE}.")
 
     # Set up the external system
     system = System(app)
@@ -24,9 +22,7 @@ def main(configFile="configuration_file.json"):
     
     # close log file and exit
     app.reset_logger()
-    app.open_logger()
-    app.logger.write(f"[INFO]: {app.time()} -- Finished all simulations.\n")
-    app.close_logger()
+    app.logger.info("Finished all simulations.")
 
 if __name__ == "__main__":
     main()

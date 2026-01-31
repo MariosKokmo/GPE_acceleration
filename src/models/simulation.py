@@ -39,18 +39,18 @@ class Simulations:
             simulation_name, parameters = combination
 
             if not os.path.isdir(simulation_name):
-                self.logger.write(f"[INFO]: {self.time} -- The simulation folder {simulation_name} does not exist. Creating now...")
+                self.app.logger.info(f"The simulation folder {simulation_name} does not exist. Creating now...")
                 os.mkdir(simulation_name)
 
             # change the working folder and run the simulation
             os.chdir(os.getcwd() + "/" + simulation_name)
             logfile  = f"{simulation_name}_log.txt"
             self.app.set_logger(logfile)
-            self.logger = self.app.open_logger()
+            self.logger = self.app.logger
             
             # create the new log file for the simulation
-            self.logger.write(f"\n[INFO]: {self.time} -- Currently in: {os.getcwd()}\n\n")
-            self.logger.write(f"[INFO]: {self.time} -- Running: {simulation_name}, started at {self.time}\n")
+            self.logger.info(f"Currently in: {os.getcwd()}")
+            self.logger.info(f"Running: {simulation_name}, started at {self.time}")
             
             # save the simulation parameters as a json file
             setup_simulations.save_parameters_to_json(self.system.simulation_parameters)
@@ -58,9 +58,6 @@ class Simulations:
             # define the BEC
             self.BEC = BEC(parameters, self.system,  self.app, simulation_name)
             self.BEC.evolve()
-
-            # close the logfile
-            self.app.close_logger()
             
             # go back to the parent directory to prepare to run the next sim
             path = Path(os.getcwd())

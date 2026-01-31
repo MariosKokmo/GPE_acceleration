@@ -7,7 +7,7 @@ class System:
     def __init__(self, app):
         self.app = app
         self.device = self.app.device
-        self.logger = self.app.open_logger()
+        self.logger = self.app.logger
         self.configFile = self.app.configFile
         self.time = app.time
         self.space_axes = None
@@ -24,7 +24,6 @@ class System:
         self.uext = None
         # call the parameter initialisation
         self._initialise_parameters()
-        self.app.close_logger()
         
     def _initialise_parameters(self):
         """
@@ -37,21 +36,18 @@ class System:
         self.simulation_parameters, fault = setup_simulations.get_simulation_parameters(self.configFile)
         
         if fault:
-            self.logger.write("[FATAL]: {} -- {}".format(self.time(), fault))
-            self.app.close_logger()
+            self.logger.critical(fault)
             raise Exception("there is an error in the configuration file. See Log.")
         # define the external potential
         potentialType = self.simulation_parameters["Potential_type"]
         new_potential = select_potential(potentialType, self.app, **self.simulation_parameters)
         
         if not new_potential:
-            self.logger.write("[FATAL]: {} -- Potential was not selected".format(self.time()))
-            self.app.close_logger()
+            self.logger.critical("Potential was not selected")
             raise Exception("there is an error in the configuration file. See log.")
         
         self.uext = new_potential
-        self.logger.write("[INFO]: {} -- Potential on device {}\n".format(self.time(), self.uext.potential.device))
-        print("[INFO]: {} -- Potential on device {}".format(self.time(), self.uext.potential.device))
+        self.logger.info(f"Potential on device {self.uext.potential.device}")
         
         # initialise the grid
         self._initialise_grid()

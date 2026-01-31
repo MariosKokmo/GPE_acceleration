@@ -43,9 +43,9 @@ class BEC:
         os.chdir(parent_path)
         gs_file = f"{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat"
         if not os.path.exists(gs_file):
-            self.logger.write(f"[INFO]: {self.time()} -- Calculating ground state...\n")
+            self.logger.info("Calculating ground state...")
             _ = gs.find_ground_state(self.parameters, self.system, gs_file, device=self.device)
-        self.logger.write(f"[INFO]: {self.time()} -- Ground state file: {gs_file}\n")
+        self.logger.info(f"Ground state file: {gs_file}")
         if platform == "win32":
             self.gs_path = os.getcwd() + "\\" + gs_file
         else:
@@ -57,7 +57,7 @@ class BEC:
         Reads the ground state file and initialises the wavefunction to ground state. 
         """
         if self.psi:
-            self.logger.write(f"[WARN]: {self.time()} -- Trying to initialise an already initialised BEC. It will overwrite.")
+            self.logger.warning("Trying to initialise an already initialised BEC. It will overwrite.")
         self._find_ground_state()
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
         self.psi = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=self.device)
@@ -92,7 +92,7 @@ class BEC:
         --------
             torch.Tensor, the new phase to be imprinted
         """
-        assert self.system.space_axes, self.logger.write(f"[FATAL]: {self.time()}-- the system has no axes initialised")
+        assert self.system.space_axes, self.logger.critical("the system has no axes initialised")
         x1, x2, x3 = self.system.space_axes
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
         
@@ -129,10 +129,10 @@ class BEC:
             charge = tuple(imprint[2])
             key = (x,y,charge)
             if key in self.all_phases.keys():
-                self.logger.write(f"[INFO]: {self.time()} -- Phase for {key} already calculated.\n")
+                self.logger.info(f"Phase for {key} already calculated.")
                 continue
             else:
-                self.logger.write(f"[INFO]: {self.time()} -- Calculating phase for {key}...\n")
+                self.logger.info(f"Calculating phase for {key}...")
                 self.all_phases[key] = self._create_vortices(imprint)
 
     def _create_vortex_list(self, imprint_position_x, imprint_position_y, imprinting_charge, imprint_times):
@@ -301,8 +301,8 @@ class BEC:
         imprint_times_str = "_".join([str(round(time / shots_per_ms, 2)) for time in self.imprint_times])
         vortices_to_imprint = "_".join([str(key) for key in self.all_phases.keys()])
         imprinting_charge_str = "_".join([str(charge) for charge in self.imprinting_charge]).replace("\n", "_")
-        self.logger.write(f"[INFO]: {self.time()} -- Will imprint at the following times : {imprint_times_str}\n")
-        self.logger.write(f"[INFO]: {self.time()} -- Will imprint the following (x,y,charges) : {vortices_to_imprint}\n")
+        self.logger.info(f"Will imprint at the following times : {imprint_times_str}")
+        self.logger.info(f"Will imprint the following (x,y,charges) : {vortices_to_imprint}")
         self.simulation_name=f'{len(self.vort_x)}vortex__initCharge{self.vort_charge[0]}__imprintCharge{imprinting_charge_str}__times{imprint_times_str}'
 
     def _write_iteration_data(self, count, t):
@@ -317,13 +317,13 @@ class BEC:
         self.rms_measurements[count] = rms
         self.cross_line[count, :] = gpe.calculate_cross_section_line(self.psi)
         self.energies.append(gpe.calculate_energy_allocation(self.psi, self.uext, self.p_grid, {"u": self.u}))
-        self.logger.write(f"t = {t / self.omega_ho}\n")
+        self.logger.info(f"t = {t / self.omega_ho}")
 
     def _perform_initial_imprint(self):
         """
         Performs the initial imprint of vortices.
         """
-        self.logger.write(f"[INFO]: {self.time()} -- Imprinting the initial topological object\n")
+        self.logger.info("Imprinting the initial topological object")
         self._imprint_vortices(self.vortices)
 
     def _perform_repetitive_imprint(self, num_imprints):
@@ -336,14 +336,14 @@ class BEC:
         charge = tuple(vortex_array[2])
         key_for_phase = (x, y, charge)
         phaseImp = self.all_phases[key_for_phase]
-        self.logger.write(f"[INFO]: {self.time()} -- Imprinting again...{key_for_phase}\n")
+        self.logger.info(f"Imprinting again...{key_for_phase}")
         self._repetitive_imprint(phaseImp)
 
     def _turn_off_potential(self):
         """
         Turns off the external potential.
         """
-        self.logger.write(f"[INFO]: {self.time()} -- External potential set to zero\n")
+        self.logger.info("External potential set to zero")
         self.uext = self.system.uext.zero()
         self.reset_potential = True
 
