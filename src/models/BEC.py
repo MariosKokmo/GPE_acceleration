@@ -255,10 +255,6 @@ class BEC:
         initial_imprint_occured = False
         shots_per_ms = self.shots // (self.system.simulation_parameters["Total_simulation_time"] * 1000)
 
-        # Open density evolution file
-        density_file = open("density_evolution.txt", "w")
-        density_file.write("count\ttime\tmax_density\tpeak_indices\n")
-
         if self.repetitive:
             imprintTime = self.imprint_times[num_imprints]
             self._log_repetitive_imprint_info(shots_per_ms)
@@ -284,15 +280,8 @@ class BEC:
             if iteration >= (self.kmax // self.shots) * self.system.uext.switchOff_time and not self.reset_potential:
                 self._turn_off_potential()
 
-            # Calculate density peak between count 148 and 190
-            if 148 <= count <= 190:
-                max_density, peak_indices = gpe.calculate_density_peak(self.psi)
-                density_file.write(f"{count}\t{t / self.omega_ho}\t{max_density.item():.6e}\t{peak_indices}\n")
-
             self._step(utot, self.dtau, self.p_sq, self.d_x)
 
-        # Close density evolution file
-        density_file.close()
 
     def _log_repetitive_imprint_info(self, shots_per_ms):
         """
@@ -315,7 +304,7 @@ class BEC:
             rw.save_figure_phase(cur_phase, count)
         rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
         self.rms_measurements[count] = rms
-        self.cross_line[count, :] = gpe.calculate_cross_section_line(self.psi)
+        self.cross_line[count, :] = gpe2d.calculate_cross_section_line(self.psi)
         self.energies.append(gpe.calculate_energy_allocation(self.psi, self.uext, self.p_grid, {"u": self.u}))
         self.logger.info(f"t = {t / self.omega_ho}")
 

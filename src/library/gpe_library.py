@@ -407,7 +407,7 @@ class GPE2DLibrary(GPELibrary):
         axis: int = 1
     ) -> torch.Tensor:
         """
-        Calculate the density on a line that crosses the condensate.
+        Calculate the column density on a line that crosses the condensate.
 
         Args:
             psi (torch.Tensor): BEC wavefunction.
