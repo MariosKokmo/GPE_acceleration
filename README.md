@@ -1,139 +1,263 @@
-# GPE_acceleration
-GPU accelerated code for the implementation of a GPE solver.
-This package contains a simple Python implementation that accelerates the usual GPE split-step Fourier solution utilising GPUs and the PyTorch software package.
+# GPE Acceleration / BAQS
+
+> **GPU-Accelerated Gross-Pitaevskii Equation Solver for Bose-Einstein Condensates**
+
+![Python](https://img.shields.io/badge/Python-3.7%2B-blue)
+![PyTorch](https://img.shields.io/badge/PyTorch-GPU-orange)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+## Overview
+
+**GPE Acceleration** (internal package name `baqs`) is a high-performance Python package designed to simulate the dynamics of Bose-Einstein Condensates (BECs) by solving the Gross-Pitaevskii Equation (GPE).
+
+Built on **PyTorch**, this software leverages **GPU acceleration** to perform rapid Split-Step Fourier Method simulations. It is specifically tailored for studying topological excitations, such as **vortices**, allowing complex imprinting scenarios like linear arrays, isolated vortices, and repetitive imprinting protocols.
+
+The current implementation focuses on solutions using the phase imprinting method on quasi-2D condensates. However, the
+use of evolving potentials and the extensibility and configurability of the software make it useful for more general topological simulations in BEC even in 3D and with the classic methods of rotating potentials.
 
 The software simulates the evolution of a BEC when a topological excitation is imprinted in the condensate.
-Currently the only topological excitation supported is vortices. The vortices can either be in a linear array or isolated.
+Currently the only topological excitation supported is vortices.
 A repetitive imprinting functionality is supported.
 
 The vortices are assumed to be printed on the n1-n3 (i.e. x-z plane). For the simulations to have physical meaning, it is assumed that the BEC is adequately flat on the n2 (y axis) so that the vortices are assumed to not bend and traverse the whole BEC along the y axis.
 
-## Features
-**Potentials**
+## Table of Contents
+- [Key Features](#key-features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Project Structure](#project-structure)
+- [How It Works](#how-it-works)
+- [Testing](#testing)
+- [Contributing](#contributing)
+- [License](#license)
 
-**Repetitive imprinting**
+## Key Features
 
-## Run
-To run the code, you simply run the `run.py` script. This script invokes any necessary function and set-up of the simulation.
+*   **🚀 GPU Acceleration**: Utilizes PyTorch and CUDA for massively parallelized computations on the GPU.
+*   **🌀 Vortex Imprinting**: specialized tools for imprinting phase Singularities (vortices) with configurable charge, position, and timing.
+*   **⚡ Automated Ground State**: Automatically calculates the ground state using Imaginary Time Evolution if it doesn't exist.
+*   **🔄 Repetitive & Array Configurations**: Support for dynamic simulation scenarios defined via simple JSON arrays.
+*   **📹 Visualization**: Integrated utilities for generating videos from simulation snapshots.
+*   **📊 Flexible Configuration**: Complete control over grid resolution, trapping potentials, and simulation physics via JSON.
 
-The simulations are defined in a json file called 'configuration_file.json'.
+## Installation
 
-**Important** -- Each configuration file is strictly for one grid and potential configuration. Multiple simulations can be run in sequence but all have to be on the same grid and potential with the same ground state.
+### Prerequisites
+*   Python 3.7+
+*   NVIDIA GPU with CUDA support (strongly recommended for performance)
 
-First the ground state for the specific grid is calculated (if it doesn't already exist). Then every simulation is run one after another and the results are stored in their respective folders.
+### Setup
 
-The flow of the logic is as follows:
-<img src="static/flow.jpg">
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/yourusername/GPE_acceleration.git
+    cd GPE_acceleration
+    ```
 
-## Dependencies
-the main package dependencies are:
-- numpy:  1.23.5
-- pandas:  1.5.3
-- torch:  1.8.1
-- matplotlib:  3.7.1
+2.  **Install the package:**
+    It is recommended to use a virtual environment.
+    ```bash
+    python -m venv venv
+    # Windows
+    .\venv\Scripts\activate
+    # Linux/Mac
+    source venv/bin/activate
+    
+    # Install the requirements
+    pip install -r requirements.txt
+    ```
+    or
 
-The software should run for Python version >=3.7
+    ```bash
+    # Install in editable mode to enable the 'baqs' CLI command
+    pip install -e .
+    ```
 
-## API Reference
+    *Note: This will automatically install all dependencies listed in `requirements.txt` (and `setup.py`). Ensure you have the correct version of PyTorch installed for your CUDA version. See [PyTorch Get Started](https://pytorch.org/get-started/locally/).*
 
-### `run.py`
-This is the entry point to the software and the simulations. This script is called and accepts all the necessary inputs (see configuration_file). Then everything runs in an automated fashion.
+## Quick Start
 
-### `library.ground_state`
-The ground state is calculated numerically using the imaginary time method.
+### Using the Script
 
+The easiest way to run a simulation is using the provided `run.py` script.
 
-For the ground state calculations, pyTorch 1.8.1 has been tested.
-With later versions, when doing the conjugations of matrices, the functions might have changed.
-Specifically, in later versions the `torch.conj()` performs a lazy conjugation and has to be realised
-in a tensor separately. In PyTorch version 1.8.1, the one currently used it is calculated directly.
-The rest of the used functions should be the same.
+1.  **Configure your simulation** by editing `configuration_file.json`.
+2.  **Run the solver:**
+    ```bash
+    python src/run.py
+    ```
 
-### `library.gpe_library`
-Provides all the necessary functions to run the simulations, load/write the data, imprint the vortices and the split-step Fourier methods.
+### Using the Command Line Interface (CLI)
 
-### `library.gpe_evolution`
-Provides the functions that run the main loop of the simulations. Simulation parameters are needed as inputs.
+For more control, you can use the CLI tool `baqs`.
 
-### `utils.setup_simulations`
-This script is responsible for reading the configuration file, performing checks on the validity of its contents and creating the simulation parameters for each simulation that will be run.
+**Installation:**
+If you haven't already, install the package in editable mode:
+```bash
+pip install -e .
+```
 
-### `utils.video_creation`
-Provides the utility functions to create the video from the snapshot data files
+**Usage:**
+```bash
+baqs <config_file> <app_config_file> [options]
+```
 
-### configuration_file
-One configuration file is needed for each grid and/or potential configuration. Multiple simulations can be run using this configuration file.
- 
- **Important** : Currently only one configuration file can exist in a working directory. If different grids need to be run at the same time, then more python processes are needed that will run in different directories (i.e. copy the code in different folders and run it there)
+**Examples:**
+*   **Check configuration only:**
+    ```bash
+    baqs configuration_file.json appConfig.json --check -v 1
+    ```
+*   **Run simulation:**
+    ```bash
+    baqs configuration_file.json appConfig.json --run -v 1
+    ```
 
- The configuration file can be built for either an array of vortices or vortices that will be repetitively imprinted.
+**Arguments:**
+*   `config`: Path to the simulation configuration JSON.
+*   `app`: Path to the application configuration JSON.
+*   `-c, --check`: Validate configuration files without running.
+*   `--run`: Execute the simulations (performs validation first).
+*   `-v, --verbose`: Set output verbosity (0: Silent, 1: Info, 2: Debug).
 
- Checks on the inputs of the configuration file will be performed before setting up the simulations.
+The system will:
+1.  Initialize the application based on `appConfig.json`.
+2.  Load the physics parameters from `configuration_file.json`.
+3.  Calculate (or load) the ground state.
+4.  Run the time-evolution simulations defined in the config.
+5.  Save results (density snapshots, metadata) to the output directory.
 
- # HOW TO CREATE THE CONFIGURATION FILE
- **Important** -- Each configuration file is strictly for one grid and potential configuration. Multiple simulations can be run in sequence but all have to be on the same grid and potential with the same ground state.
+## Configuration
 
-- "Grid_positive_limits": These are the 3D grid axes in microns e.g. [60, 1.5, 60],
-- "Grid_negative_limits": Usually the grid is symmetric and the potential is considered centered e.g. [-60, -1.5, -60],
-- "Grid_resolution": This is the number of points along each one of the axes e.g.[512, 16, 512] for a flat BEC,
-- "Trapping_frequencies": These are the frequencies in Hz [20, 300, 20],
-- "Potential_type":e.g. "harmonic" For a full list see below,
-- "Total_simulation_time":150e-3, in sec,
-- "dt":5e-7, the time resolution of the simulation in sec,
-- "snapshots":150, the number of snapshot data to be generated. Each file can be several Mb. For more intuitive results set it the same as the total time so that each snapshot is 1ms,
-- "vortex_excitation":1, This is used as a boolean that indicates the topological excitation we are simulating,
-- "repetitive":1, Indicates that repetitive imprinting is used,
+The simulations are controlled by two JSON files.
 
-For the rest it is expected that the lists contain as many elements as the simulations we want to run. Each element of the list (could be a list itself) is a separate configuration
-- "vortex_charge":[2, 5], List of initial charges,
-- "imprinting_charge":[1, 3],
-- "vortex_position_x":[0, 0],
-- "vortex_position_y":[0, 0],
-- "imprint_position_x":[0, 0],
-- "imprint_position_y":[0, 0],
-- "imprint_every":[20, 50],
-- "imprint_times":[[10,20,50], []],
-- "max_imprints":[3, 2]
+### 1. Simulation Config (`configuration_file.json`)
+This file defines the physical system (Grid, Potential) and the specific scenarios to simulate.
 
-The above configuration would give 2 simulations.
+**Important**: One config file corresponds to one Grid/Potential setup. Lists in the parameters below allow you to run multiple *evolution scenarios* sequentially on that same grid.
 
-**NOTE: When we give "imprint_times", those override the "imprint_every" parameter. We need to give an empty list for the "imprint_times" if we want them to be automatically calculated based on the "imprint_every" parameter**
+**Global Parameters (Grid & Physics):**
+*   `Grid_[positive/negative]_limits`: Spatial extent of the simulation box (microns).
+*   `Grid_resolution`: Number of grid points `[Nx, Ny, Nz]`.
+*   `Trapping_frequencies`: Harmonic trap frequencies `[fx, fy, fz]` (Hz).
+*   `Potential_type`: Type of external potential (e.g., `"harmonic"`).
+*   `dt`: Time step (seconds).
+*   `Total_simulation_time`: Duration of simulation (seconds).
 
-_First simulation_:
+**Scenario Parameters (Lists for multiple runs):**
+*   `vortex_charge`: List of vortex charges to imprint.
+*   `vortex_position_[x/y]`: Initial positions of vortices.
+*   `imprint_times`: Specific times to imprint new vortices.
+*   `repetitive`: Boolean flag for repetitive imprinting modes.
 
-We start with an initial vortex of charge 2 at position (0,0). We then want to imprint a vortex of charge 1 at position (0,0). Because we give exact times to imprint, this overrides the "imprint_every" parameter which is 20, and the imprints will happen at the exact times 10, 20 and 50. Also note that the "max_imprints" are 3 for this simulation so all the imprints will happen.
+**Example:**
+```json
+{
+    "Grid_positive_limits": [60, 1.5, 60],
+    "Trapping_frequencies": [20, 300, 20],
+    "Grid_resolution": [512, 16, 512],
+    "Total_simulation_time": 0.15,
+    "dt": 5e-7,
+    "vortex_charge": [[1], [2]], 
+    "vortex_position_x": [[0], [10]]
+}
+```
+*This example configures a grid and runs 2 separate simulations: one with a charge-1 vortex at x=0, and another with a charge-2 vortex at x=10.*
 
-_Second simulation_:
+### 2. Application Config (`appConfig.json`)
+Controls application-level settings.
+```json
+{
+    "logfile": "simulation.log",
+    "configFile": "configuration_file.json",
+    "write_velocity": false,   // Output velocity field data
+    "phase_imaging": false     // generate phase images
+}
+```
 
-We start with an initial vortex of charge 5 at position (0,0). We then imprint a vortex of charge 3 at position (0,0). Now we don't give exact times to imprint, so the "imprint_every" value of 50 will create the times. The imprints times will be 50, 100, 150. However, because the "max_imprints" are 2, only the imprints at times 50 and 100 will occur. Note that even that we give an "imprint_every" value, we have to give an empty list for the "imprint_times" otherwise an error will be raised. The software needs to be able to align the inputs at the same length.
+## Project Structure
 
-## Second example
-- "vortex_charge":[[5,5],[1,1,1,1,1,1,1]],
-- "imprinting_charge":[[[-5,-5]],[[0,0,0,0,0,0,0]]],
-- "vortex_position_x":[[0,0],[0,0,0,0,0,0,0]],
-- "vortex_position_y":[[-20,20],[-30,-20,-10,0,10,20,30]],
-- "initial_imprint_time":[4,4],
-- "imprint_position_x":[[[0,0]],[[0,0,0,0,0,0,0]]],
-- "imprint_position_y":[[[-20,20]],[[0,0,0,0,0,0,0]]],
-- "imprint_every":[[],[]],
-- "imprint_times":[[50],[50]],
-- "max_imprints":[1,0]
+```
+GPE_acceleration/
+├── src/
+│   ├── application.py       # App configuration & logging
+│   ├── run.py               # Legacy entry point script
+│   ├── simulator.py         # Simulator orchestration
+│   ├── cli/                 # Command Line Interface
+│   │   ├── baqs.py          # CLI entry point
+│   │   └── functions.py     # CLI helper functions
+│   ├── library/             # Core Physics Library
+│   │   ├── gpe_library.py   # Split-Step Fourier implementation
+│   │   ├── ground_state.py  # Imaginary time evolution
+│   │   ├── parameters.py    # Simulation parameter handling
+│   │   └── potentials.py    # Potential definitions (harmonic, etc.)
+│   ├── models/              # Simulation Data Structures
+│   │   ├── BEC.py           # Bose-Einstein Condensate object
+│   │   ├── base_BEC.py      # Abstract base class for BECs
+│   │   ├── system.py        # System wrapper (Grid + Potential)
+│   │   └── simulation.py    # Simulation logic wrapper
+│   └── utils/
+│       ├── read_write_utils.py # I/O operations
+│       ├── setup_simulations.py # Simulation configuration setup
+│       └── video_creation.py   # Visualization tools
+├── tests/                   # Unit tests
+├── configuration_file.json  # Physics config
+├── appConfig.json           # App settings
+└── requirements.txt         # Python dependencies
+```
 
-This would also give two simulations.
-_First simulation_:
-we imprint two vortices of charge +5 each at positions (0,-20) and (0,20) at time 4.
-We thin imprint again at time 50, at the same positions two vortices of charges -5.
+## How It Works
 
-_Second simulation_:
-We imprint 7 vortices of charge +1 each, all with an x coordinate equal to 0, and linearly allocated between
-y=-30 and y=+30. We perform no imprints, note that the max_imprints variable is set to 0 for this simulation.
+1.  **Ground State**: The solver first checks if a ground state exists for the given grid and potential. If not, it computes it using **Imaginary Time Propagation (ITP)**.
+2.  **Time Evolution**: The real-time dynamics are solved using the **Split-Step Fourier Method**.
+3.  **Vortex Imprinting**: Phase imprinting is applied to the wavefunction at specified time steps to create vortices.
+4.  **Hardware**: All dense matrix operations (FFTs, element-wise multiplications) are offloaded to the GPU via PyTorch tensors.
 
-List of available potentials:
-- **harmonic** , a harmonic potential with 3 trapping frequencies
-- **constant**, a constant potential across the whole grid
-- **ramp**, potential that ramps up from an initial to a final amplitude in a linear fashion
-- **rampharmonic**, harmonic potential whose amplitude ramps up linearly in time
+## Testing
 
-# Contributing
+Ensuring the reliability of the simulation code is critical. **Users should always test their new features** or modifications before deploying them to ensure physical accuracy and software stability.
 
-# License
+The project includes a suite of unit tests located in the `tests/` directory, covering everything from CLI arguments to core physics calculations.
+
+### Running Tests
+
+You can run the tests using Python's built-in `unittest` framework or `pytest` (recommended for better output).
+
+**Using `unittest`:**
+```bash
+python -m unittest discover tests
+```
+
+**Using `pytest`:**
+First, install pytest (if not already installed):
+```bash
+pip install pytest
+```
+Then run the test suite:
+```bash
+pytest
+```
+
+### Test Suite Structure
+
+*   `test_baqs.py`: Tests the Command Line Interface (CLI) functionality.
+*   `test_BEC.py`: Tests the main `BEC` class and high-level simulation logic.
+*   `test_gpe_library.py`: Validates the core mathematical functions and split-step Fourier implementation.
+*   `test_potentials.py`: Verifies the correct generation of trapping potentials (harmonic, etc.).
+*   `test_setup_simulations.py`: Checks the configuration loading and validation logic.
+
+When contributing or adding new features, please ensure you add corresponding test cases to maintain coverage.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1.  Fork the project.
+2.  Create your feature branch (`git checkout -b feature/AmazingFeature`).
+3.  Commit your changes (`git commit -m 'Add some AmazingFeature'`).
+4.  Push to the branch (`git push origin feature/AmazingFeature`).
+5.  Open a Pull Request.
+
+## License
+
+Distributed under the MIT License. See `LICENSE` for more information.

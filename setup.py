@@ -29,7 +29,7 @@ setup(
                            ),
     entry_points={
         "console_scripts": [
-            "gpeu=src.cli.baqs:main",
+            "baqs=src.cli.baqs:main",
         ],
     },
     include_package_data=True,

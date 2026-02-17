@@ -11,7 +11,7 @@ import os
 
 import numpy as np
 
-from src.library.gpe_library import CONSTANTS
+from src.library.parameters import CONSTANTS
 
 
 # =============================================================================
@@ -208,16 +208,35 @@ def _simulations_repetitive(parameters_list):
         imprinting_charge = parameters["imprinting_charge"]
         max_imprints = parameters["max_imprints"]
         imprint_every = parameters["imprint_every"]
-        imprint_times = "_".join([str(time) for time in parameters["imprint_times"]])
         
         if isinstance(charges, list):
             number_charges = len(charges)
         else:
             number_charges = 1
         
+        if isinstance(charges, list) and len(charges) > 10:
+            charges_str = f"_init_{charges[0]}_last_{charges[-1]}"
+        elif isinstance(charges, list):
+            charges_str = "_".join([str(charge) for charge in charges])
+        else:
+            charges_str = str(charges)
+
+        if isinstance(imprinting_charge, list) and len(imprinting_charge) > 10:
+            imprinting_charge_str = f"_init_{imprinting_charge[0]}_last_{imprinting_charge[-1]}"
+        elif isinstance(imprinting_charge, list):
+            imprinting_charge_str = "_".join([str(charge) for charge in imprinting_charge])
+        else:
+            imprinting_charge_str = str(imprinting_charge)
+
+        imprint_times_list = parameters["imprint_times"]
+        if isinstance(imprint_times_list, list) and len(imprint_times_list) > 10:
+            imprint_times = f"_init_{imprint_times_list[0]}_last_{imprint_times_list[-1]}"
+        else:
+            imprint_times = "_".join([str(time) for time in imprint_times_list])
+
         simulation_name = (
-            f'{number_charges}vort__initCharge{charges}__'
-            f'imprintCharge{imprinting_charge}__snapshots{imprint_times}'
+            f'{number_charges}vort__initCharge{charges_str}__'
+            f'imprintCharge{imprinting_charge_str}__snapshots{imprint_times}'
         )
         simulations.append([simulation_name, parameters])
         

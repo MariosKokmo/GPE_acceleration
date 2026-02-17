@@ -3,9 +3,10 @@ Base BEC class with common functionality.
 This class provides the core functionality for BEC simulations.
 Extend this class and override methods as needed for custom simulations.
 """
+from typing import Optional, List, Tuple, Dict, Any, Union
 from src.library.gpe_library import GPELibrary as gpe
 from src.library.gpe_library import GPE2DLibrary as gpe2d
-import src.library.ground_state as gs
+from src.library.ground_state import GroundState as gs
 import src.utils.read_write_utils as rw
 from src.utils import video_creation
 import numpy as np
@@ -32,7 +33,7 @@ class BaseBEC:
     4. Override _write_custom_outputs() for additional output files
     """
     
-    def __init__(self, parameters, system, app, simulation_name):
+    def __init__(self, parameters: Dict[str, Any], system: Any, app: Any, simulation_name: str) -> None:
         """
         Initialize the BEC simulation.
         
@@ -42,7 +43,7 @@ class BaseBEC:
             app: Application object with device, logger, etc.
             simulation_name: str, name of this simulation
         """
-        self.psi = None  # Wavefunction
+        self.psi: Optional[torch.Tensor] = None  # Wavefunction
         self.app = app
         self.device = app.device
         self.logger = app.logger
@@ -50,41 +51,55 @@ class BaseBEC:
         self.parameters = parameters
         self.simulation_name = simulation_name
         self.system = system
-        self.gs_path = None
+        self.gs_path: Optional[str] = None
         
         # TODO: Add your custom instance variables here
         # Example:
         # self.custom_data = []
         # self.analysis_results = {}
 
-    def _find_ground_state(self):
+    def _find_ground_state(self) -> None:
         """
         Finds the ground state for the BEC in the system.
         If it exists, it just reads the file.
         The required format is `{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat`
         If a ground state file does not exist, it is computed.
         """
-        n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
-        fx, fy, fz = self.system.simulation_parameters["Trapping_frequencies"]
-        
+        try:
+            n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
+            fx, fy, fz = self.system.simulation_parameters["Trapping_frequencies"]
+        except KeyError as e:
+            self.logger.error(f"Missing simulation parameter: {e}")
+            raise
+
         # Find ground state for the specific grid and potential if it doesn't exist
         cur_path = Path(os.getcwd())
         parent_path = str(cur_path.parent.absolute())
-        os.chdir(parent_path)
         
-        gs_file = f"{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat"
-        if not os.path.exists(gs_file):
-            self.logger.info("Calculating ground state...")
-            _ = gs.find_ground_state(self.parameters, self.system, gs_file, device=self.device)
-        self.logger.info(f"Ground state file: {gs_file}")
-        
-        if platform == "win32":
-            self.gs_path = os.getcwd() + "\\" + gs_file
-        else:
-            self.gs_path = os.getcwd() + "/" + gs_file
-        os.chdir(cur_path)
+        try:
+            os.chdir(parent_path)
+            
+            gs_file = f"{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat"
+            if not os.path.exists(gs_file):
+                self.logger.info("Calculating ground state...")
+                try:
+                    _ = gs.find_ground_state(self.parameters, self.system, gs_file, device=self.device)
+                except Exception as e:
+                    self.logger.error(f"Failed to calculate ground state: {e}")
+                    raise
+            self.logger.info(f"Ground state file: {gs_file}")
+            
+            if platform == "win32":
+                self.gs_path = os.getcwd() + "\\" + gs_file
+            else:
+                self.gs_path = os.getcwd() + "/" + gs_file
+        except OSError as e:
+             self.logger.error(f"File system error in _find_ground_state: {e}")
+             raise
+        finally:
+            os.chdir(cur_path)
     
-    def _initialise(self):
+    def _initialise(self) -> None:
         """
         Reads the ground state file and initialises the wavefunction to ground state.
         
@@ -93,16 +108,22 @@ class BaseBEC:
         if self.psi is not None:
             self.logger.warning("Trying to initialise an already initialised BEC. It will overwrite.")
         
-        self._find_ground_state()
-        n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
-        self.psi = torch.zeros((n1, n2, n3), dtype=torch.cdouble, device=self.device)
-        self.psi = gs.read_ground_state(self.gs_path, n1, n2, n3)
-        self.psi = self.psi.to(self.device)
+        try:
+            self._find_ground_state()
+            n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
+            self.psi = torch.zeros((n1, n2, n3), dtype=torch.cdouble, device=self.device)
+            if self.gs_path is None:
+                raise ValueError("Ground state path is None after _find_ground_state")
+            self.psi = gs.read_ground_state(self.gs_path, n1, n2, n3)
+            self.psi = self.psi.to(self.device)
+        except Exception as e:
+            self.logger.error(f"Failed to initialise BEC: {e}")
+            raise
         
         # TODO: Add custom initialization if needed
         # Example: apply initial phase imprinting, modify amplitude, etc.
     
-    def _step(self, utot, dtau, p_sq, d_x):
+    def _step(self, utot: torch.Tensor, dtau: float, p_sq: torch.Tensor, d_x: float) -> None:
         """
         Performs a single time step evolution of the BEC
         following the split-step Fourier method.
@@ -113,18 +134,26 @@ class BaseBEC:
             p_sq: torch.Tensor, squared momentum grid
             d_x: float, spatial grid spacing
         """
-        self.psi = gpe.split_step_step(self.psi, utot, dtau, p_sq, d_x)
+        if self.psi is None:
+             raise RuntimeError("BEC wavefunction (psi) is not initialized.")
+        try:
+            self.psi = gpe.split_step_step(self.psi, utot, dtau, p_sq, d_x)
+        except Exception as e:
+            self.logger.error(f"Error during step evolution: {e}")
+            raise
     
-    def _extract_phase(self):
+    def _extract_phase(self) -> torch.Tensor:
         """
         Returns the phase of the condensate wavefunction.
         
         Returns:
             torch.Tensor, the phase of the wavefunction
         """
+        if self.psi is None:
+             raise RuntimeError("BEC wavefunction (psi) is not initialized.")
         return gpe.extract_phase(self.psi)
 
-    def evolve(self):
+    def evolve(self) -> None:
         """
         Main evolution method. This orchestrates the entire simulation.
         
@@ -136,22 +165,26 @@ class BaseBEC:
         
         Override this if you need a completely different simulation structure.
         """
-        # Get the parameters for easy access
-        self._initialize_simulation_parameters()
+        try:
+            # Get the parameters for easy access
+            self._initialize_simulation_parameters()
 
-        # Initialise the BEC on the ground state
-        self._initialise()
+            # Initialise the BEC on the ground state
+            self._initialise()
 
-        # TODO: Add any pre-evolution setup here
-        # Example: calculate special phases, set up diagnostics, etc.
-        
-        # Evolve the BEC
-        self._main_simulation_loop()
+            # TODO: Add any pre-evolution setup here
+            # Example: calculate special phases, set up diagnostics, etc.
+            
+            # Evolve the BEC
+            self._main_simulation_loop()
 
-        # Write various output files
-        self._write_simulation_outputs()
+            # Write various output files
+            self._write_simulation_outputs()
+        except Exception as e:
+            self.logger.critical(f"Simulation failed in evolve(): {e}")
+            raise
 
-    def _initialize_simulation_parameters(self):
+    def _initialize_simulation_parameters(self) -> None:
         """
         Initializes simulation parameters for easy access.
         
@@ -160,37 +193,46 @@ class BaseBEC:
         
         Override or extend this method to add custom parameters.
         """
-        params = self.system.simulation_parameters
-        
-        # Time evolution parameters
-        self.kmax = params["kmax"]
-        self.dt = params["dt"]
-        self.omega_ho = params["omega_ho"]
-        self.shots = params["shots"]
-        self.dtau = params["dtau"]
-        self.d_x = params["d_x"]
-        self.a_ho = params["a_ho"]
-        
-        # Grid parameters
-        self.p_sq = self.system.p_sq
-        self.p_grid = self.system.p_grid
-        self.x1, self.x2, self.x3 = self.system.space_axes
-        self.p1, self.p2, self.p3 = self.system.momentum_axes
-        self.n1, self.n2, self.n3 = params["Grid_resolution"]
-        
-        # Potential and interaction
-        self.uext = self.system.uext.potential
-        self.u = params["u"]
-        
-        # Measurement arrays
-        self.rms_measurements = {}
-        self.cross_line = torch.zeros(self.shots, self.n1)
-        self.energies = []
-        
-        # TODO: Call custom parameter initialization
-        self._initialize_custom_parameters()
-    
-    def _initialize_custom_parameters(self):
+        try:
+            params = self.system.simulation_parameters
+            
+            # Time evolution parameters
+            self.kmax = params["kmax"]
+            self.dt = params["dt"]
+            self.omega_ho = params["omega_ho"]
+            self.shots = params["shots"]
+            self.dtau = params["dtau"]
+            self.d_x = params["d_x"]
+            self.a_ho = params["a_ho"]
+            
+            # Grid parameters
+            self.p_sq = self.system.p_sq
+            self.p_grid = self.system.p_grid
+            self.x1, self.x2, self.x3 = self.system.space_axes
+            self.p1, self.p2, self.p3 = self.system.momentum_axes
+            self.n1, self.n2, self.n3 = params["Grid_resolution"]
+            
+            # Potential and interaction
+            if self.system.uext is None:
+                raise ValueError("External potential (uext) is None")
+            self.uext = self.system.uext.potential
+            self.u = params["u"]
+            
+            # Measurement arrays
+            self.rms_measurements = {}
+            self.cross_line = torch.zeros(self.shots, self.n1)
+            self.energies = []
+            
+            # TODO: Call custom parameter initialization
+            self._initialize_custom_parameters()
+        except KeyError as e:
+            self.logger.error(f"Missing simulation parameter: {e}")
+            raise
+        except AttributeError as e:
+            self.logger.error(f"System attribute missing: {e}")
+            raise
+            
+    def _initialize_custom_parameters(self) -> None:
         """
         Initialize custom simulation-specific parameters.
         
@@ -204,7 +246,7 @@ class BaseBEC:
         # TODO: Add your custom parameter initialization here
         pass
 
-    def _main_simulation_loop(self):
+    def _main_simulation_loop(self) -> None:
         """
         Main loop for evolving the BEC system.
         
@@ -217,6 +259,8 @@ class BaseBEC:
         - Add special measurement/diagnostic routines
         - Implement adaptive time stepping
         """
+        if self.psi is None:
+            raise RuntimeError("BEC wavefunction (psi) is not initialized.")
         count = 0
         
         # TODO: Add any pre-loop initialization
@@ -224,34 +268,40 @@ class BaseBEC:
         
         self.logger.info("Starting main simulation loop...")
         
-        for iteration in range(self.kmax):
-            # Current time
-            t = self.dt * iteration * self.omega_ho
+        try:
+            for iteration in range(self.kmax):
+                # Current time
+                t = self.dt * iteration * self.omega_ho
+                
+                # Total potential: interaction + external
+                utot = self.u * torch.abs(self.psi) ** 2 + self.uext
+                
+                # Save data at regular intervals
+                if self.shots > 0 and iteration % (self.kmax // self.shots) == 0:
+                    self._write_iteration_data(count, t)
+                    count += 1
+                
+                # TODO: Add custom physics here
+                # Examples:
+                # - if iteration == special_time:
+                #     self._apply_custom_operation()
+                # - if some_condition(t):
+                #     self._modify_potential()
+                # - Adaptive measurements based on system state
+                
+                # Perform time step
+                self._step(utot, self.dtau, self.p_sq, self.d_x)
+                if hasattr(self.system.uext, 'evol'):
+                    self.uext = self.system.uext.evol(t)
             
-            # Total potential: interaction + external
-            utot = self.u * torch.abs(self.psi) ** 2 + self.uext
-            
-            # Save data at regular intervals
-            if iteration % (self.kmax // self.shots) == 0:
-                self._write_iteration_data(count, t)
-                count += 1
-            
-            # TODO: Add custom physics here
-            # Examples:
-            # - if iteration == special_time:
-            #     self._apply_custom_operation()
-            # - if some_condition(t):
-            #     self._modify_potential()
-            # - Adaptive measurements based on system state
-            
-            # Perform time step
-            self._step(utot, self.dtau, self.p_sq, self.d_x)
-        
-        self.logger.info(f"Simulation loop completed. Total iterations: {self.kmax}")
+            self.logger.info(f"Simulation loop completed. Total iterations: {self.kmax}")
+        except Exception as e:
+            self.logger.error(f"Error in main simulation loop at iteration {iteration if 'iteration' in locals() else 'unknown'}: {e}")
+            raise
         
         # TODO: Add any post-loop cleanup or final measurements
 
-    def _write_iteration_data(self, count, t):
+    def _write_iteration_data(self, count: int, t: float) -> None:
         """
         Writes data for the current iteration.
         
@@ -264,28 +314,35 @@ class BaseBEC:
             count: int, snapshot counter
             t: float, current time
         """
-        # Write density data
-        rw.write_data(self.psi, count, self.x1, self.x3, self.n1, self.n3, self.a_ho)
-        
-        # Optional: save phase imaging
-        if self.app.phase_imaging:
-            cur_phase = self._extract_phase()
-            rw.save_figure_phase(cur_phase, count)
-        
-        # Calculate and store RMS radius
-        rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
-        self.rms_measurements[count] = rms
-        
-        # Calculate cross-section
-        self.cross_line[count, :] = gpe.calculate_cross_section_line(self.psi)
-        
-        # Calculate energy allocation
-        self.energies.append(
-            gpe.calculate_energy_allocation(self.psi, self.uext, self.p_grid, {"u": self.u})
-        )
-        
-        # Log progress
-        self.logger.info(f"t = {t / self.omega_ho}")
+        if self.psi is None:
+             self.logger.error("Skipping write_iteration_data because psi is None.")
+             return
+
+        try:
+            # Write density data
+            rw.write_data(self.psi, count, self.x1, self.x3, self.n1, self.n3, self.a_ho)
+            
+            # Optional: save phase imaging
+            if hasattr(self.app, 'phase_imaging') and self.app.phase_imaging:
+                cur_phase = self._extract_phase()
+                rw.save_figure_phase(cur_phase, count)
+            
+            # Calculate and store RMS radius
+            rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
+            self.rms_measurements[count] = rms
+            
+            # Calculate cross-section line density
+            self.cross_line[count, :] = gpe2d.calculate_cross_section_line(self.psi)
+            
+            # Calculate energy allocation
+            self.energies.append(
+                gpe.calculate_energy_allocation(self.psi, self.uext, self.p_grid, {"u": self.u})
+            )
+            
+            # Log progress
+            self.logger.info(f"t = {t / self.omega_ho}")
+        except Exception as e:
+            self.logger.error(f"Error writing iteration data at step {count}: {e}")
         
         # TODO: Add custom measurements here
         # Examples:
@@ -293,7 +350,7 @@ class BaseBEC:
         # - self._check_convergence_criteria()
         # - self._save_special_diagnostic(count)
 
-    def _write_simulation_outputs(self):
+    def _write_simulation_outputs(self) -> None:
         """
         Writes various output files after the simulation.
         
@@ -302,41 +359,44 @@ class BaseBEC:
         
         Override or extend this to add custom outputs.
         """
-        SimulationName = self.simulation_name
-        
-        # Write RMS measurements
-        rw.write_rms(self.rms_measurements, SimulationName)
-        rw.save_rms_figure(f"{SimulationName}_RMS_meas.txt")
-        
-        # Write cross-section data
-        rw.save_cross_section_line_figure(self.cross_line)
-        rw.save_tensor_to_csv(self.cross_line, "cross_line_density.csv")
-        
-        # Write energy data
-        rw.write_energy_terms(self.energies, "energies.txt")
-        
-        # Create visualization videos
-        video_creation.create_video(
-            count=len(self.rms_measurements), 
-            simulation_name=SimulationName, 
-            n1=self.n1, 
-            n3=self.n3
-        )
-        
-        if self.app.write_velocity:
-            video_creation.create_velocity_video(
-                len(self.rms_measurements), 
-                SimulationName, 
-                self.n1, 
-                self.n3
+        try:
+            SimulationName = self.simulation_name
+            
+            # Write RMS measurements
+            rw.write_rms(self.rms_measurements, SimulationName)
+            rw.save_rms_figure(f"{SimulationName}_RMS_meas.txt")
+            
+            # Write cross-section data
+            rw.save_cross_section_line_figure(self.cross_line)
+            rw.save_tensor_to_csv(self.cross_line, "cross_line_density.csv")
+            
+            # Write energy data
+            rw.write_energy_terms(self.energies, "energies.txt")
+            
+            # Create visualization videos
+            video_creation.create_video(
+                count=len(self.rms_measurements), 
+                simulation_name=SimulationName, 
+                n1=self.n1, 
+                n3=self.n3
             )
-        
-        # TODO: Write custom outputs
-        self._write_custom_outputs()
-        
-        self.logger.info(f"All outputs written for simulation: {SimulationName}")
+            
+            if hasattr(self.app, 'write_velocity') and self.app.write_velocity:
+                video_creation.create_velocity_video(
+                    len(self.rms_measurements), 
+                    SimulationName, 
+                    self.n1, 
+                    self.n3
+                )
+            
+            # TODO: Write custom outputs
+            self._write_custom_outputs()
+            
+            self.logger.info(f"All outputs written for simulation: {SimulationName}")
+        except Exception as e:
+            self.logger.error(f"Error writing final simulation outputs: {e}")
     
-    def _write_custom_outputs(self):
+    def _write_custom_outputs(self) -> None:
         """
         Write custom simulation-specific outputs.
         
@@ -353,12 +413,14 @@ class BaseBEC:
 
     # Utility methods that might be useful
     
-    def get_density(self):
+    def get_density(self) -> torch.Tensor:
         """
         Returns the density |psi|^2 of the condensate.
         
         Returns:
             torch.Tensor, density of the wavefunction
         """
+        if self.psi is None:
+            raise RuntimeError("BEC wavefunction (psi) is not initialized.")
         return torch.abs(self.psi) ** 2
 
