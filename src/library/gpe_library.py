@@ -395,11 +395,112 @@ class GPE2DLibrary(GPELibrary):
             torch.Tensor: RMS radius of the condensate.
         """
         center_x, center_y, center_z = center
-        N_tot = torch.where(torch.abs(psi) ** 2 > 0, 1, 0).sum()
+        # Use sum of probability densities as the normalization factor for weighted average
+        total_density = torch.sum(torch.abs(psi) ** 2)
+        
         g_x, g_y, g_z = space_grid
         d_sq = (g_x - center_x) ** 2 + (g_y - center_y) ** 2 + (g_z - center_z) ** 2
-        rms = (torch.sum(d_sq * (torch.abs(psi) ** 2)) / N_tot) ** 0.5
+        
+        # RMS = sqrt( sum(r^2 * density) / sum(density) )
+        rms = (torch.sum(d_sq * (torch.abs(psi) ** 2)) / total_density) ** 0.5
         return rms
+
+    @staticmethod
+    def create_dark_soliton(
+        x1: torch.Tensor,
+        x3: torch.Tensor,
+        n1: int,
+        n2: int,
+        n3: int,
+        positions: list,
+        widths: list,
+        axes: list,
+        greyness: list = None,
+        device: torch.device = torch.device("cpu"),
+    ) -> torch.Tensor:
+        """
+        Create a multiplicative dark-soliton profile for the wavefunction.
+
+        Each soliton is a stripe of suppressed density across the condensate.
+        The profile for a single dark soliton along coordinate *r* is
+
+            f(r) = cos(alpha) * tanh( cos(alpha) * (r - r0) / width ) + i * sin(alpha)
+
+        where ``alpha = 0`` gives a stationary black soliton (full density dip
+        plus a pi phase jump) and ``0 < alpha < pi/2`` gives a grey (moving)
+        soliton with a shallower dip.
+
+        When multiple solitons are requested the individual profiles are
+        multiplied together.
+
+        Args:
+            x1 (torch.Tensor): 1-D real-space axis along the first grid dimension.
+            x3 (torch.Tensor): 1-D real-space axis along the third grid dimension.
+            n1, n2, n3 (int): Number of grid points in each dimension.
+            positions (list[float]): Centre positions of each soliton (in the
+                same units as the corresponding axis).
+            widths (list[float]): Characteristic width of each soliton.  For a
+                BEC this is typically the healing length xi.
+            axes (list[int]): Axis for each soliton: ``1`` for x (stripe
+                perpendicular to x1) or ``3`` for z (stripe perpendicular to x3).
+            greyness (list[float], optional): Grey-soliton angle alpha for
+                each soliton in radians.  ``0`` = black (default), values up
+                to ``pi/2`` make the soliton progressively greyer / faster.
+            device (torch.device): Device for the output tensor.
+
+        Returns:
+            torch.Tensor: Complex-valued tensor of shape ``(n1, n2, n3)`` to
+            be multiplied element-wise with the wavefunction.
+        """
+        n_solitons = len(positions)
+        if greyness is None:
+            greyness = [0.0] * n_solitons
+
+        # Build 3-D coordinate grids (only the two relevant axes matter)
+        grid_x1 = x1.to(device=device, dtype=torch.float64)
+        grid_x3 = x3.to(device=device, dtype=torch.float64)
+        # shape: (n1, 1, 1) and (1, 1, n3)
+        gx = grid_x1.reshape(n1, 1, 1).expand(n1, n2, n3)
+        gz = grid_x3.reshape(1, 1, n3).expand(n1, n2, n3)
+
+        mask = torch.ones(n1, n2, n3, dtype=torch.cdouble, device=device)
+
+        for pos, w, ax, alpha in zip(positions, widths, axes, greyness):
+            if ax == 1:
+                r = gx
+            elif ax == 3:
+                r = gz
+            else:
+                raise ValueError(f"Soliton axis must be 1 (x) or 3 (z), got {ax}")
+
+            cos_a = float(np.cos(alpha))
+            sin_a = float(np.sin(alpha))
+            profile = cos_a * torch.tanh(cos_a * (r - pos) / w) + 1j * sin_a
+            mask = mask * profile
+
+        return mask
+
+    @staticmethod
+    def imprint_dark_soliton(
+        psi: torch.Tensor,
+        soliton_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Apply a dark-soliton mask to the wavefunction.
+
+        Unlike vortex imprinting (which adds pure phase), this multiplies
+        the wavefunction by a complex profile that modifies both amplitude
+        and phase simultaneously.
+
+        Args:
+            psi (torch.Tensor): Current wavefunction (n1, n2, n3).
+            soliton_mask (torch.Tensor): Profile returned by
+                :meth:`create_dark_soliton`.
+
+        Returns:
+            torch.Tensor: Updated wavefunction.
+        """
+        return psi * soliton_mask
 
     @staticmethod
     def calculate_cross_section_line(
@@ -422,3 +523,255 @@ class GPE2DLibrary(GPELibrary):
         elif axis == 2:
             return torch.sum(torch.abs(psi[:, :, n3 // 2]) ** 2, dim=0)
         return None
+
+class GPE3DLibrary(GPELibrary):
+    """
+    Extensions of the GPE library for fully three-dimensional BEC simulations.
+
+    Provides tools for 3D-specific topological structures (vortex rings,
+    vortex lines), density diagnostics (column densities, 2D slices), and
+    observables (superfluid velocity field, angular momentum components).
+    """
+
+    @staticmethod
+    def create_vortex_ring(
+        x1: torch.Tensor,
+        x2: torch.Tensor,
+        x3: torch.Tensor,
+        n1: int,
+        n2: int,
+        n3: int,
+        ring_radius: float,
+        center: tuple,
+        axis: int,
+        charge: int = 1,
+        device: torch.device = torch.device("cpu"),
+    ) -> torch.Tensor:
+        """
+        Create the phase texture for a quantized vortex ring.
+
+        The ring is a circle of radius ``ring_radius`` centred at ``center``
+        lying in the plane perpendicular to ``axis``.  The phase winds by
+        2π * charge around the vortex core (the ring itself) using toroidal
+        coordinates:
+
+            phi = atan2(x_axis - c_axis, rho - ring_radius)
+
+        where rho is the cylindrical radius in the plane of the ring.
+
+        Args:
+            x1, x2, x3 (torch.Tensor): 1-D real-space axes.
+            n1, n2, n3 (int): Grid point counts per dimension.
+            ring_radius (float): Radius of the vortex ring.
+            center (tuple): (c1, c2, c3) – 3-D centre of the ring in grid units.
+            axis (int): 1, 2, or 3 – axis the ring encircles (ring lies in the
+                perpendicular plane).
+            charge (int): Topological charge (winding number). Default 1.
+            device (torch.device): Computation device.
+
+        Returns:
+            torch.Tensor: Real phase tensor of shape (n1, n2, n3).
+        """
+        if axis not in (1, 2, 3):
+            raise ValueError(f"axis must be 1, 2, or 3; got {axis}")
+
+        c1, c2, c3 = center
+        gx = x1.to(device=device, dtype=torch.float64).reshape(n1, 1, 1).expand(n1, n2, n3)
+        gy = x2.to(device=device, dtype=torch.float64).reshape(1, n2, 1).expand(n1, n2, n3)
+        gz = x3.to(device=device, dtype=torch.float64).reshape(1, 1, n3).expand(n1, n2, n3)
+
+        if axis == 1:
+            rho = torch.sqrt((gy - c2) ** 2 + (gz - c3) ** 2)
+            phi = torch.atan2(gx - c1, rho - ring_radius)
+        elif axis == 2:
+            rho = torch.sqrt((gx - c1) ** 2 + (gz - c3) ** 2)
+            phi = torch.atan2(gy - c2, rho - ring_radius)
+        else:  # axis == 3
+            rho = torch.sqrt((gx - c1) ** 2 + (gy - c2) ** 2)
+            phi = torch.atan2(gz - c3, rho - ring_radius)
+
+        phase = charge * phi
+        phase[phase.isnan()] = 0.0
+        return phase
+
+    @staticmethod
+    def create_vortex_lines(
+        x1: torch.Tensor,
+        x2: torch.Tensor,
+        x3: torch.Tensor,
+        n1: int,
+        n2: int,
+        n3: int,
+        positions: list,
+        charges: list,
+        axis: int,
+        device: torch.device = torch.device("cpu"),
+    ) -> torch.Tensor:
+        """
+        Create the phase texture for one or more straight vortex lines.
+
+        Each vortex line runs parallel to ``axis``.  Its core intersects the
+        perpendicular plane at the coordinate pair given in ``positions``:
+
+        - axis=1: each position is (c2, c3)
+        - axis=2: each position is (c1, c3)
+        - axis=3: each position is (c1, c2)
+
+        Args:
+            x1, x2, x3 (torch.Tensor): 1-D real-space axes.
+            n1, n2, n3 (int): Grid point counts.
+            positions (list[tuple]): Core positions in the perpendicular plane.
+            charges (list[int]): Topological charges for each line.
+            axis (int): 1, 2, or 3 – axis the vortex lines run along.
+            device (torch.device): Computation device.
+
+        Returns:
+            torch.Tensor: Real phase tensor of shape (n1, n2, n3).
+        """
+        if axis not in (1, 2, 3):
+            raise ValueError(f"axis must be 1, 2, or 3; got {axis}")
+
+        gx = x1.to(device=device, dtype=torch.float64).reshape(n1, 1, 1).expand(n1, n2, n3)
+        gy = x2.to(device=device, dtype=torch.float64).reshape(1, n2, 1).expand(n1, n2, n3)
+        gz = x3.to(device=device, dtype=torch.float64).reshape(1, 1, n3).expand(n1, n2, n3)
+
+        phase = torch.zeros(n1, n2, n3, dtype=torch.float64, device=device)
+        for (ca, cb), q in zip(positions, charges):
+            if axis == 1:
+                da, db = gy - ca, gz - cb
+            elif axis == 2:
+                da, db = gx - ca, gz - cb
+            else:  # axis == 3
+                da, db = gx - ca, gy - cb
+            phase = phase + q * torch.atan2(db, da)
+
+        phase[phase.isnan()] = 0.0
+        return phase
+
+    @staticmethod
+    def column_density(
+        psi: torch.Tensor,
+        axis: int,
+    ) -> torch.Tensor:
+        """
+        Compute the column density by integrating |psi|² along the given axis.
+
+        Args:
+            psi (torch.Tensor): BEC wavefunction (n1, n2, n3).
+            axis (int): 1, 2, or 3 – axis to integrate along.
+
+        Returns:
+            torch.Tensor: 2-D column density tensor in the remaining plane.
+        """
+        if axis not in (1, 2, 3):
+            raise ValueError(f"axis must be 1, 2, or 3; got {axis}")
+        return torch.sum(torch.abs(psi) ** 2, dim=axis - 1)
+
+    @staticmethod
+    def cross_section_plane(
+        psi: torch.Tensor,
+        axis: int,
+        index: int = None,
+    ) -> torch.Tensor:
+        """
+        Extract a 2-D density slice orthogonal to the given axis.
+
+        Args:
+            psi (torch.Tensor): BEC wavefunction (n1, n2, n3).
+            axis (int): 1, 2, or 3 – normal axis of the slice.
+            index (int, optional): Grid index along ``axis``. Defaults to the
+                centre of that axis.
+
+        Returns:
+            torch.Tensor: 2-D density slice.
+        """
+        if axis not in (1, 2, 3):
+            raise ValueError(f"axis must be 1, 2, or 3; got {axis}")
+        density = torch.abs(psi) ** 2
+        idx = index if index is not None else psi.shape[axis - 1] // 2
+        if axis == 1:
+            return density[idx, :, :]
+        elif axis == 2:
+            return density[:, idx, :]
+        else:
+            return density[:, :, idx]
+
+    @staticmethod
+    def calculate_velocity3D(
+        psi: torch.Tensor,
+        p_grid: tuple,
+    ) -> tuple:
+        """
+        Compute the 3-D superfluid velocity field using spectral derivatives.
+
+        In dimensionless units (ℏ/m = 1) the superfluid velocity is:
+
+            v_i = Im( ψ* ∂_i ψ ) / |ψ|²
+
+        where the spatial derivative is evaluated spectrally.  Velocity is
+        set to zero wherever the density vanishes.
+
+        Args:
+            psi (torch.Tensor): BEC wavefunction (n1, n2, n3).
+            p_grid (tuple): (px, py, pz) – 3-D momentum meshgrids.
+
+        Returns:
+            tuple: (v1, v2, v3) – velocity component tensors, each (n1, n2, n3).
+        """
+        px, py, pz = p_grid
+        psi_f = torch.fft.fftn(psi, norm='forward')
+        density = torch.abs(psi) ** 2
+        velocities = []
+        for p in (px, py, pz):
+            dpsi = torch.fft.ifftn(1j * p * psi_f, norm='forward')
+            numerator = torch.imag(psi.conj() * dpsi)
+            v = torch.where(density > 0, numerator / density, torch.zeros_like(numerator))
+            velocities.append(v)
+        return tuple(velocities)
+
+    @staticmethod
+    def angular_momentum(
+        psi: torch.Tensor,
+        space_grid: tuple,
+        p_grid: tuple,
+        component: int,
+    ) -> torch.Tensor:
+        """
+        Calculate the expectation value of one angular momentum component.
+
+        In units of ℏ:
+
+            ⟨L_1⟩ = ⟨ψ | -i(x2 ∂_3 - x3 ∂_2) | ψ⟩
+            ⟨L_2⟩ = ⟨ψ | -i(x3 ∂_1 - x1 ∂_3) | ψ⟩
+            ⟨L_3⟩ = ⟨ψ | -i(x1 ∂_2 - x2 ∂_1) | ψ⟩
+
+        Spatial derivatives are evaluated spectrally.
+
+        Args:
+            psi (torch.Tensor): Normalised BEC wavefunction (n1, n2, n3).
+            space_grid (tuple): (g_x, g_y, g_z) – 3-D real-space meshgrids.
+            p_grid (tuple): (px, py, pz) – 3-D momentum meshgrids.
+            component (int): 1, 2, or 3.
+
+        Returns:
+            torch.Tensor: Scalar expectation value ⟨L_component⟩ (in ℏ).
+        """
+        if component not in (1, 2, 3):
+            raise ValueError(f"component must be 1, 2, or 3; got {component}")
+
+        gx, gy, gz = space_grid
+        px, py, pz = p_grid
+        psi_f = torch.fft.fftn(psi, norm='forward')
+
+        def _d(p_comp):
+            return torch.fft.ifftn(1j * p_comp * psi_f, norm='forward')
+
+        if component == 1:
+            Lpsi = -1j * (gy * _d(pz) - gz * _d(py))
+        elif component == 2:
+            Lpsi = -1j * (gz * _d(px) - gx * _d(pz))
+        else:  # component == 3
+            Lpsi = -1j * (gx * _d(py) - gy * _d(px))
+
+        return torch.real(torch.sum(psi.conj() * Lpsi))
+

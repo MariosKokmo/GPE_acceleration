@@ -1,6 +1,6 @@
 import argparse
-import os
 from src.cli.functions import validate_config, run_simulations, check_args
+from src.application import application
 
 def main():
     parser = argparse.ArgumentParser(description="GPU accelerated code for GPE systems.")
@@ -14,18 +14,18 @@ def main():
 
     # Validate arguments
     check_args(args)
+    app = application(args.app)
+    logger = app.logger
 
     # Perform configuration validation
     if args.check:
-        if args.verbose > 0:
-            print("[INFO] Validating configuration files...")
-        validate_config(args.config, args.verbose)
+        logger.info("Validating configuration files...")
+        validate_config(args.config, args.verbose, logger=logger)
 
     # Run simulations
     if args.run:
-        if args.verbose > 0:
-            print("[INFO] Running simulations...")
-        run_simulations()
+        logger.info("Running simulations...")
+        run_simulations(args.config, args.app, logger=logger)
 
 
 if __name__ == "__main__":

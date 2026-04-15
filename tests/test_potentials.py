@@ -365,5 +365,68 @@ class TestRampHarmonicPot(unittest.TestCase):
         self.assertTrue(torch.allclose(ratio[mask], torch.tensor(2.0, dtype=torch.double), atol=0.01))
 
 
+class TestAbsorberPotential(unittest.TestCase):
+    def setUp(self):
+        self.app = MockApp()
+        self.simulation_parameters = {
+            "Grid_resolution": [32, 8, 32],
+            "x_min": [-2.0, -0.5, -2.0],
+            "dx": [0.125, 0.125, 0.125],
+            "w": [1.0, 1.0, 1.0]
+        }
+
+    def test_absorber_optional_by_default(self):
+        potential = HarmonicPot(self.app, amplitude=1.0, **self.simulation_parameters)
+        self.assertIsNone(potential.absorber_potential)
+
+        evolved = potential.evol(0.5)
+        self.assertFalse(torch.is_complex(evolved))
+
+    def test_absorber_adds_imaginary_damping_near_edges(self):
+        params = {
+            **self.simulation_parameters,
+            "Absorber_enabled": True,
+            "Absorber_strength": 2.0,
+            "Absorber_start_ratio": 0.7,
+            "Absorber_power": 2.0,
+            "Absorber_tinit": 0.0
+        }
+        potential = HarmonicPot(self.app, amplitude=0.0, **params)
+        evolved = potential.evol(1.0)
+
+        self.assertTrue(torch.is_complex(evolved))
+
+        center = evolved[evolved.shape[0] // 2, evolved.shape[1] // 2, evolved.shape[2] // 2].imag.item()
+        edge = evolved[0, evolved.shape[1] // 2, 0].imag.item()
+
+        # Imaginary component should be non-positive and stronger near boundaries.
+        self.assertLessEqual(edge, 0.0)
+        self.assertLess(edge, center)
+
+    def test_absorber_time_ramp(self):
+        params = {
+            **self.simulation_parameters,
+            "Absorber_enabled": True,
+            "Absorber_strength": 1.0,
+            "Absorber_start_ratio": 0.8,
+            "Absorber_power": 2.0,
+            "Absorber_tinit": 0.5,
+            "Absorber_tfinal": 1.5
+        }
+        potential = ConstPot(self.app, amplitude=0.0, **params)
+
+        before = potential.evol(0.25)
+        mid = potential.evol(1.0)
+        after = potential.evol(2.0)
+
+        before_abs = torch.max(torch.abs(before.imag)).item()
+        mid_abs = torch.max(torch.abs(mid.imag)).item()
+        after_abs = torch.max(torch.abs(after.imag)).item()
+
+        self.assertAlmostEqual(before_abs, 0.0, places=12)
+        self.assertGreater(mid_abs, 0.0)
+        self.assertGreater(after_abs, mid_abs)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3,13 +3,13 @@ Base BEC class with common functionality.
 This class provides the core functionality for BEC simulations.
 Extend this class and override methods as needed for custom simulations.
 """
-from typing import Optional, List, Tuple, Dict, Any, Union
+from typing import Optional, Dict, Any
+import logging
 from src.library.gpe_library import GPELibrary as gpe
 from src.library.gpe_library import GPE2DLibrary as gpe2d
 from src.library.ground_state import GroundState as gs
 import src.utils.read_write_utils as rw
 from src.utils import video_creation
-import numpy as np
 import os
 import torch
 from pathlib import Path
@@ -43,10 +43,15 @@ class BaseBEC:
             app: Application object with device, logger, etc.
             simulation_name: str, name of this simulation
         """
+        if app is None:
+            raise ValueError("app must not be None")
+        if system is None:
+            raise ValueError("system must not be None")
+
         self.psi: Optional[torch.Tensor] = None  # Wavefunction
         self.app = app
         self.device = app.device
-        self.logger = app.logger
+        self.logger = app.logger if getattr(app, "logger", None) else logging.getLogger(__name__)
         self.time = app.time
         self.parameters = parameters
         self.simulation_name = simulation_name
@@ -69,7 +74,7 @@ class BaseBEC:
             n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
             fx, fy, fz = self.system.simulation_parameters["Trapping_frequencies"]
         except KeyError as e:
-            self.logger.error(f"Missing simulation parameter: {e}")
+            self.logger.exception("Missing simulation parameter while finding ground state.")
             raise
 
         # Find ground state for the specific grid and potential if it doesn't exist
@@ -85,7 +90,7 @@ class BaseBEC:
                 try:
                     _ = gs.find_ground_state(self.parameters, self.system, gs_file, device=self.device)
                 except Exception as e:
-                    self.logger.error(f"Failed to calculate ground state: {e}")
+                    self.logger.exception("Failed to calculate ground state.")
                     raise
             self.logger.info(f"Ground state file: {gs_file}")
             
@@ -94,8 +99,8 @@ class BaseBEC:
             else:
                 self.gs_path = os.getcwd() + "/" + gs_file
         except OSError as e:
-             self.logger.error(f"File system error in _find_ground_state: {e}")
-             raise
+            self.logger.exception("File system error in _find_ground_state.")
+            raise
         finally:
             os.chdir(cur_path)
     
@@ -111,13 +116,12 @@ class BaseBEC:
         try:
             self._find_ground_state()
             n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
-            self.psi = torch.zeros((n1, n2, n3), dtype=torch.cdouble, device=self.device)
             if self.gs_path is None:
                 raise ValueError("Ground state path is None after _find_ground_state")
             self.psi = gs.read_ground_state(self.gs_path, n1, n2, n3)
             self.psi = self.psi.to(self.device)
         except Exception as e:
-            self.logger.error(f"Failed to initialise BEC: {e}")
+            self.logger.exception("Failed to initialise BEC.")
             raise
         
         # TODO: Add custom initialization if needed
@@ -135,12 +139,8 @@ class BaseBEC:
             d_x: float, spatial grid spacing
         """
         if self.psi is None:
-             raise RuntimeError("BEC wavefunction (psi) is not initialized.")
-        try:
-            self.psi = gpe.split_step_step(self.psi, utot, dtau, p_sq, d_x)
-        except Exception as e:
-            self.logger.error(f"Error during step evolution: {e}")
-            raise
+            raise RuntimeError("BEC wavefunction (psi) is not initialized.")
+        self.psi = gpe.split_step_step(self.psi, utot, dtau, p_sq, d_x)
     
     def _extract_phase(self) -> torch.Tensor:
         """
@@ -181,8 +181,18 @@ class BaseBEC:
             # Write various output files
             self._write_simulation_outputs()
         except Exception as e:
-            self.logger.critical(f"Simulation failed in evolve(): {e}")
+            self.logger.exception("Simulation failed in evolve().")
             raise
+
+    def _get_snapshot_interval(self) -> Optional[int]:
+        """
+        Returns the iteration interval used for snapshot writes.
+
+        Returns None when snapshots are disabled.
+        """
+        if self.shots <= 0:
+            return None
+        return max(1, self.kmax // self.shots)
 
     def _initialize_simulation_parameters(self) -> None:
         """
@@ -217,6 +227,13 @@ class BaseBEC:
                 raise ValueError("External potential (uext) is None")
             self.uext = self.system.uext.potential
             self.u = params["u"]
+
+            if self.kmax <= 0:
+                raise ValueError("kmax must be > 0")
+            if self.shots < 0:
+                raise ValueError("shots must be >= 0")
+            if self.n1 <= 0 or self.n2 <= 0 or self.n3 <= 0:
+                raise ValueError("Grid_resolution values must all be > 0")
             
             # Measurement arrays
             self.rms_measurements = {}
@@ -226,10 +243,13 @@ class BaseBEC:
             # TODO: Call custom parameter initialization
             self._initialize_custom_parameters()
         except KeyError as e:
-            self.logger.error(f"Missing simulation parameter: {e}")
+            self.logger.exception("Missing simulation parameter during initialization.")
             raise
         except AttributeError as e:
-            self.logger.error(f"System attribute missing: {e}")
+            self.logger.exception("System attribute missing during initialization.")
+            raise
+        except ValueError:
+            self.logger.exception("Invalid simulation parameter values.")
             raise
             
     def _initialize_custom_parameters(self) -> None:
@@ -262,6 +282,8 @@ class BaseBEC:
         if self.psi is None:
             raise RuntimeError("BEC wavefunction (psi) is not initialized.")
         count = 0
+        iteration = 0
+        snapshot_interval = self._get_snapshot_interval()
         
         # TODO: Add any pre-loop initialization
         # Example: open diagnostic files, initialize counters, etc.
@@ -277,7 +299,11 @@ class BaseBEC:
                 utot = self.u * torch.abs(self.psi) ** 2 + self.uext
                 
                 # Save data at regular intervals
-                if self.shots > 0 and iteration % (self.kmax // self.shots) == 0:
+                if (
+                    snapshot_interval is not None
+                    and iteration % snapshot_interval == 0
+                    and count < self.shots
+                ):
                     self._write_iteration_data(count, t)
                     count += 1
                 
@@ -296,7 +322,7 @@ class BaseBEC:
             
             self.logger.info(f"Simulation loop completed. Total iterations: {self.kmax}")
         except Exception as e:
-            self.logger.error(f"Error in main simulation loop at iteration {iteration if 'iteration' in locals() else 'unknown'}: {e}")
+            self.logger.exception(f"Error in main simulation loop at iteration {iteration}.")
             raise
         
         # TODO: Add any post-loop cleanup or final measurements
@@ -317,6 +343,12 @@ class BaseBEC:
         if self.psi is None:
              self.logger.error("Skipping write_iteration_data because psi is None.")
              return
+
+        if count < 0 or count >= self.shots:
+            self.logger.warning(
+                f"Skipping write_iteration_data for out-of-range snapshot index {count}."
+            )
+            return
 
         try:
             # Write density data
@@ -342,7 +374,8 @@ class BaseBEC:
             # Log progress
             self.logger.info(f"t = {t / self.omega_ho}")
         except Exception as e:
-            self.logger.error(f"Error writing iteration data at step {count}: {e}")
+            self.logger.exception(f"Error writing iteration data at step {count}.")
+            raise
         
         # TODO: Add custom measurements here
         # Examples:
@@ -360,11 +393,9 @@ class BaseBEC:
         Override or extend this to add custom outputs.
         """
         try:
-            SimulationName = self.simulation_name
-            
             # Write RMS measurements
-            rw.write_rms(self.rms_measurements, SimulationName)
-            rw.save_rms_figure(f"{SimulationName}_RMS_meas.txt")
+            rw.write_rms(self.rms_measurements, self.simulation_name)
+            rw.save_rms_figure(f"{self.simulation_name}_RMS_meas.txt")
             
             # Write cross-section data
             rw.save_cross_section_line_figure(self.cross_line)
@@ -376,7 +407,7 @@ class BaseBEC:
             # Create visualization videos
             video_creation.create_video(
                 count=len(self.rms_measurements), 
-                simulation_name=SimulationName, 
+                simulation_name=self.simulation_name, 
                 n1=self.n1, 
                 n3=self.n3
             )
@@ -384,7 +415,7 @@ class BaseBEC:
             if hasattr(self.app, 'write_velocity') and self.app.write_velocity:
                 video_creation.create_velocity_video(
                     len(self.rms_measurements), 
-                    SimulationName, 
+                    self.simulation_name, 
                     self.n1, 
                     self.n3
                 )
@@ -392,9 +423,10 @@ class BaseBEC:
             # TODO: Write custom outputs
             self._write_custom_outputs()
             
-            self.logger.info(f"All outputs written for simulation: {SimulationName}")
+            self.logger.info(f"All outputs written for simulation: {self.simulation_name}")
         except Exception as e:
-            self.logger.error(f"Error writing final simulation outputs: {e}")
+            self.logger.exception("Error writing final simulation outputs.")
+            raise
     
     def _write_custom_outputs(self) -> None:
         """

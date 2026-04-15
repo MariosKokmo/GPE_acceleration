@@ -5,6 +5,7 @@
     "Trapping_frequencies":[20, 300, 20],
     "Potential_type":"harmonic",
     "SwitchOff_time":9999,
+    "three-body-losses": 0,
     "Total_simulation_time":15e-3,
     "dt":5e-7,
     "snapshots":15,

@@ -18,6 +18,18 @@ from src.library.parameters import CONSTANTS
 # Configuration File Reading
 # =============================================================================
 
+def _load_json_from_cwd(config_file):
+    """Load and parse a JSON file located relative to the current working directory."""
+    path_config_file = os.path.join(os.getcwd(), config_file)
+
+    try:
+        with open(path_config_file, "r") as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse configuration file '{config_file}': {e}") from e
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"Configuration file not found: '{path_config_file}'") from e
+
 def _read_configuration_file(config_file):
     """
     Read the simulation configuration file.
@@ -39,17 +51,7 @@ def _read_configuration_file(config_file):
     FileNotFoundError
         If the configuration file does not exist.
     """
-    cwd = os.getcwd()  
-    print(cwd)
-    path_config_file = os.path.join(cwd, config_file)
-    
-    try:
-        with open(path_config_file, 'r') as f:
-            simulations = json.load(f)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse configuration file '{config_file}': {e}")   
-    
-    return simulations
+    return _load_json_from_cwd(config_file)
 
 
 def get_application_config(config_file="appConfig.json"):
@@ -70,23 +72,34 @@ def get_application_config(config_file="appConfig.json"):
     ------
     FileNotFoundError
         If the configuration file does not exist.
-    json.JSONDecodeError
+    ValueError
         If the configuration file is not valid JSON.
     """
-    cwd = os.getcwd()
-    print(cwd)
-    path_config_file = os.path.join(cwd, config_file)
-    
-    with open(path_config_file, 'r') as f:
-        app_configs = json.load(f)
-    
-    return app_configs
+    return _load_json_from_cwd(config_file)
 
 
 
 # =============================================================================
 # Simulation Setup
 # =============================================================================
+
+def _format_name_component(values):
+    """Format scalar/list values into compact simulation-name components."""
+    if isinstance(values, list):
+        cleaned_values = [value for value in values if value != " "]
+        if len(cleaned_values) > 10:
+            return f"_init_{cleaned_values[0]}_last_{cleaned_values[-1]}"
+        return "_".join(str(value) for value in cleaned_values)
+    return str(values)
+
+
+def _ensure_simulation_directory(simulation_name):
+    """Create a simulation directory when missing and log directory status."""
+    print("creating folder: ", simulation_name)
+    if not os.path.isdir(simulation_name):
+        os.mkdir(simulation_name)
+    else:
+        print(f"{simulation_name} folder already exists...data will be overwritten")
 
 def get_simulation_combinations(sims):
     """
@@ -136,18 +149,34 @@ def get_simulation_combinations(sims):
     imprint_position_x = sims["imprint_position_x"]
     imprint_position_y = sims["imprint_position_y"]
     imprint_times = sims["imprint_times"]
+
+    # Optional dark-soliton parameters (shared across all simulations)
+    dark_soliton_params = {}
+    if sims.get("dark_soliton", False):
+        dark_soliton_params = {
+            "dark_soliton": True,
+            "soliton_positions": sims["soliton_positions"],
+            "soliton_widths": sims["soliton_widths"],
+            "soliton_axes": sims["soliton_axes"],
+            "soliton_greyness": sims.get("soliton_greyness", None),
+            "soliton_imprint_time": sims.get("soliton_imprint_time", 0),
+        }
     
-    assert repetitive == 0 or repetitive == 1, "repetitive must be 0 or 1"
+    if repetitive not in (0, 1):
+        raise ValueError("repetitive must be 0 or 1")
     
     if repetitive:
         max_imprints = sims['max_imprints']
-        assert len(max_imprints) >= 1, "max_imprints is not correct in configuration file"
-        assert len(charges) == len(imprint_every), "charges and imprint_every have different number of values"
-        assert len(charges) == len(max_imprints), "charges and max_imprints have different number of values"
+        if len(max_imprints) < 1:
+            raise ValueError("max_imprints is not correct in configuration file")
+        if len(charges) != len(imprint_every):
+            raise ValueError("charges and imprint_every have different number of values")
+        if len(charges) != len(max_imprints):
+            raise ValueError("charges and max_imprints have different number of values")
         
         parameters_repetitive = []
         for i in range(len(charges)):
-            parameters_repetitive.append({
+            sim_params_i = {
                 "vortex_charge": charges[i],
                 "vortex_position_x": vortex_position_x[i],
                 "vortex_position_y": vortex_position_y[i],
@@ -160,12 +189,14 @@ def get_simulation_combinations(sims):
                 "imprint_times": imprint_times[i],
                 "initial_imprint_time": initial_imprint_time[i],
                 "vortex_excitation": vortex_excitation
-            })
+            }
+            sim_params_i.update(dark_soliton_params)
+            parameters_repetitive.append(sim_params_i)
         simulations = _simulations_repetitive(parameters_repetitive)
     else:
         parameters_multi_vortex = []
         for i in range(len(charges)):
-            parameters_multi_vortex.append({
+            sim_params_i = {
                 "vortex_charge": charges[i],
                 "vortex_position_x": vortex_position_x[i],
                 "vortex_position_y": vortex_position_y[i],
@@ -178,7 +209,9 @@ def get_simulation_combinations(sims):
                 "imprint_position_y": [],
                 "vortex_excitation": vortex_excitation,
                 "imprint_times": []
-            })
+            }
+            sim_params_i.update(dark_soliton_params)
+            parameters_multi_vortex.append(sim_params_i)
         simulations = _simulations_multi_vortex(parameters_multi_vortex)
     
     return simulations
@@ -214,25 +247,9 @@ def _simulations_repetitive(parameters_list):
         else:
             number_charges = 1
         
-        if isinstance(charges, list) and len(charges) > 10:
-            charges_str = f"_init_{charges[0]}_last_{charges[-1]}"
-        elif isinstance(charges, list):
-            charges_str = "_".join([str(charge) for charge in charges])
-        else:
-            charges_str = str(charges)
-
-        if isinstance(imprinting_charge, list) and len(imprinting_charge) > 10:
-            imprinting_charge_str = f"_init_{imprinting_charge[0]}_last_{imprinting_charge[-1]}"
-        elif isinstance(imprinting_charge, list):
-            imprinting_charge_str = "_".join([str(charge) for charge in imprinting_charge])
-        else:
-            imprinting_charge_str = str(imprinting_charge)
-
-        imprint_times_list = parameters["imprint_times"]
-        if isinstance(imprint_times_list, list) and len(imprint_times_list) > 10:
-            imprint_times = f"_init_{imprint_times_list[0]}_last_{imprint_times_list[-1]}"
-        else:
-            imprint_times = "_".join([str(time) for time in imprint_times_list])
+        charges_str = _format_name_component(charges)
+        imprinting_charge_str = _format_name_component(imprinting_charge)
+        imprint_times = _format_name_component(parameters["imprint_times"])
 
         simulation_name = (
             f'{number_charges}vort__initCharge{charges_str}__'
@@ -240,11 +257,7 @@ def _simulations_repetitive(parameters_list):
         )
         simulations.append([simulation_name, parameters])
         
-        print("creating folder: ", simulation_name)
-        if not os.path.isdir(simulation_name):
-            os.mkdir(simulation_name)
-        else:
-            print(f"{simulation_name} folder already exists...data will be overwritten")
+        _ensure_simulation_directory(simulation_name)
     
     return simulations
 
@@ -284,11 +297,7 @@ def _simulations_multi_vortex(parameters_list):
         )
         simulations.append([simulation_name, parameters])
         
-        print("creating folder: ", simulation_name)
-        if not os.path.isdir(simulation_name):
-            os.mkdir(simulation_name)
-        else:
-            print(f"{simulation_name} folder already exists...data will be overwritten")
+        _ensure_simulation_directory(simulation_name)
     
     return simulations
 
@@ -379,6 +388,20 @@ def get_simulation_parameters(config_file_path):
     # Interaction strength
     u = 4.0 * CONSTANTS.pi * CONSTANTS.nat * CONSTANTS.ascat / a_ho 
     
+    # 3-body losses
+    if bool(sim_params["three-body-losses"]):
+        k3 = CONSTANTS.k3
+    else:
+        k3 = 0.0
+
+    # Optional absorber (complex absorbing potential) settings
+    absorber_enabled = bool(sim_params.get("Absorber_enabled", False))
+    absorber_strength = float(sim_params.get("Absorber_strength", 0.0))
+    absorber_start_ratio = float(sim_params.get("Absorber_start_ratio", 0.8))
+    absorber_power = float(sim_params.get("Absorber_power", 2.0))
+    absorber_tinit = float(sim_params.get("Absorber_tinit", 0.0))
+    absorber_tfinal = sim_params.get("Absorber_tfinal", None)
+
     # Normalizations
     w = w / omega_ho
     x_max = x_max * 1e-6 / a_ho
@@ -404,6 +427,13 @@ def get_simulation_parameters(config_file_path):
         "Total_simulation_time": t_evol,
         "kmax": kmax,
         "u": u,
+        "k3": k3,
+        "Absorber_enabled": absorber_enabled,
+        "Absorber_strength": absorber_strength,
+        "Absorber_start_ratio": absorber_start_ratio,
+        "Absorber_power": absorber_power,
+        "Absorber_tinit": absorber_tinit,
+        "Absorber_tfinal": absorber_tfinal,
         "a_ho": a_ho,
         "omega_ho": omega_ho,
         "d_x": d_x,
@@ -701,7 +731,7 @@ def _perform_reimprint_checks(simulation_params):
         for index, times in enumerate(simulation_params["imprint_times"]):
             # Check that the maximum imprint time is less than simulation time
             # Imprint times are given in snapshots
-            if max(times) > snapshots:
+            if times and max(times) > snapshots:
                 msg = f"The maximum imprint time is greater than the total simulation time for simulation {index + 1}\n"
                 return False, msg
     

@@ -298,12 +298,16 @@ class BEC:
             self.uext = self.system.uext.potential
             self.n1, self.n2, self.n3 = params["Grid_resolution"]
             self.u = params["u"]
+            self.k3 = params["k3"]
             self.rms_measurements = {}
             self.cross_line = torch.zeros(self.shots, self.n1)
             self.energies = []
 
             if self.parameters.get("vortex_excitation", False):
                 self._initialize_vortex_parameters()
+
+            if self.parameters.get("dark_soliton", False):
+                self._initialize_dark_soliton_parameters()
         except KeyError as e:
             self.logger.error(f"Missing simulation parameter: {e}")
             raise
@@ -343,6 +347,56 @@ class BEC:
             self.logger.error(f"Error initializing vortex parameters: {e}")
             raise
 
+    def _initialize_dark_soliton_parameters(self) -> None:
+        """
+        Initializes dark-soliton parameters from the simulation configuration.
+
+        Expected keys (all lists of the same length):
+          - ``soliton_positions``: centre positions in dimensionless units.
+          - ``soliton_widths``: characteristic widths (healing length scale).
+          - ``soliton_axes``: which axis each soliton is perpendicular to (1 or 3).
+          - ``soliton_greyness`` (optional): grey-soliton angle in radians per soliton.
+          - ``soliton_imprint_time``: snapshot index at which the soliton is imprinted.
+        """
+        try:
+            self.soliton_positions = self.parameters["soliton_positions"]
+            self.soliton_widths = self.parameters["soliton_widths"]
+            self.soliton_axes = self.parameters["soliton_axes"]
+            self.soliton_greyness = self.parameters.get("soliton_greyness", None)
+            self.soliton_imprint_time = self.parameters.get("soliton_imprint_time", 0)
+            self.soliton_imprinted = False
+            self.logger.info(
+                f"Dark soliton configured: {len(self.soliton_positions)} soliton(s), "
+                f"imprint at snapshot {self.soliton_imprint_time}"
+            )
+        except KeyError as e:
+            self.logger.error(f"Missing dark soliton parameter: {e}")
+            raise
+
+    def _imprint_dark_solitons(self) -> None:
+        """
+        Creates and applies the dark-soliton mask to the wavefunction.
+        """
+        if self.psi is None:
+            raise RuntimeError("BEC wavefunction (psi) is not initialized.")
+        try:
+            x1, _, x3 = self.system.space_axes
+            mask = gpe2d.create_dark_soliton(
+                x1, x3,
+                self.n1, self.n2, self.n3,
+                positions=self.soliton_positions,
+                widths=self.soliton_widths,
+                axes=self.soliton_axes,
+                greyness=self.soliton_greyness,
+                device=self.device,
+            )
+            self.psi = gpe2d.imprint_dark_soliton(self.psi, mask)
+            self.soliton_imprinted = True
+            self.logger.info("Dark soliton(s) imprinted successfully.")
+        except Exception as e:
+            self.logger.error(f"Error imprinting dark solitons: {e}")
+            raise
+
     def _main_simulation_loop(self) -> None:
         """
         Main loop for evolving the BEC system.
@@ -371,7 +425,8 @@ class BEC:
 
             for iteration in range(self.kmax):
                 t = self.dt * iteration * self.omega_ho
-                utot = self.u * torch.abs(self.psi) ** 2 + self.uext
+                loss_term = - self.k3 * torch.abs(self.psi)**4
+                utot = (self.u * torch.abs(self.psi) ** 2 + self.uext) + (1j * loss_term)
 
                 if self.shots > 0 and iteration % (self.kmax // self.shots) == 0:
                     self._write_iteration_data(count, t)
@@ -380,6 +435,10 @@ class BEC:
                 if iteration == (self.kmax // self.shots) * self.initial_imprint_time and not initial_imprint_occured:
                     self._perform_initial_imprint()
                     initial_imprint_occured = True
+
+                if hasattr(self, 'soliton_positions') and not self.soliton_imprinted:
+                    if iteration == (self.kmax // self.shots) * self.soliton_imprint_time:
+                        self._imprint_dark_solitons()
 
                 if self.repetitive and self.imprint_times and iteration == (self.kmax // self.shots) * imprintTime and num_imprints < self.max_imprints:
                     self._perform_repetitive_imprint(num_imprints)

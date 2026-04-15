@@ -1,9 +1,27 @@
 import os
-import json
+import logging
 from src.utils.setup_simulations import _check_simulation_parameters, get_simulation_parameters
 from src.run import main as run_code
 
-def validate_config(config_path, verbose):
+def _set_logger_verbosity(logger, verbose):
+    """Set console/file handler levels according to CLI verbosity."""
+    if logger is None:
+        return
+
+    if verbose <= 0:
+        target_level = logging.WARNING
+    elif verbose == 1:
+        target_level = logging.INFO
+    else:
+        target_level = logging.DEBUG
+
+    logger.setLevel(logging.DEBUG)
+    for handler in logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+            handler.setLevel(target_level)
+
+
+def validate_config(config_path, verbose, logger=None):
     """
     Validates the configuration file for the simulation.
 
@@ -21,19 +39,21 @@ def validate_config(config_path, verbose):
     ValueError
         If the configuration file is invalid or missing required fields.
     """
+    _set_logger_verbosity(logger, verbose)
+
     # Check if the configuration file exists
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file '{config_path}' does not exist.")
 
-    if verbose > 0:
-        print(f"[INFO] Found configuration file: {config_path}")
+    if logger is not None:
+        logger.info(f"Found configuration file: {config_path}")
 
-    if verbose > 1:
-        print(f"[DEBUG] Loaded configuration: {config_path}")
+    if logger is not None:
+        logger.debug(f"Loaded configuration path: {config_path}")
 
     params, msg = get_simulation_parameters(config_path)
-    if verbose > 0:
-        print(f"[INFO] {msg}")
+    if logger is not None and msg:
+        logger.info(msg)
 
     # Ensure params is a dictionary
     if not isinstance(params, dict):
@@ -41,17 +61,20 @@ def validate_config(config_path, verbose):
 
     # Validate the configuration using functions from setup_simulations.py
     try:
-        ok, msg =_check_simulation_parameters(params)
+        ok, msg = _check_simulation_parameters(params)
     except ValueError as e:
         raise ValueError(f"Configuration validation error: {e}")
 
-    if verbose > 0:
+    if logger is not None:
         if ok:
-            print("[INFO] Configuration file validation passed.")
+            logger.info("Configuration file validation passed.")
         else:
-            print(msg)
+            logger.error(msg)
 
-def check_args(args):
+    return ok, msg
+
+
+def check_args(args, logger=None):
     """
     Validates the command-line arguments.
     """
@@ -67,8 +90,11 @@ def check_args(args):
     if args.run and not args.check:
         raise ValueError("The '--run' flag requires '--check' to be executed first.")
 
-    if args.verbose > 1:
-        print("[DEBUG] Arguments validated successfully.")
+    if logger is not None:
+        logger.debug("Arguments validated successfully.")
 
-def run_simulations():
-    run_code()
+
+def run_simulations(config_path=None, app_config_path=None, logger=None):
+    if logger is not None:
+        logger.info("Launching simulation run.")
+    run_code(config_path, app_config_path)

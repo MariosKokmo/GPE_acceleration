@@ -3,9 +3,12 @@ import torch
 from src.models.system import System
 from src.models.simulation import Simulations
 
-def main(configFile="configuration_file.json"):
+def main(configFile="configuration_file.json", appConfigFile="appConfig.json"):
     # Set up the application
-    app = ap.application()
+    app = ap.application(appConfigFile)
+    if configFile:
+        app.configFile = configFile
+
     DEVICE = torch.device('cuda') if torch.cuda.is_available() else 'cpu'
     app.set_device(DEVICE)
 

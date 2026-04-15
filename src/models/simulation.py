@@ -34,7 +34,7 @@ class Simulations:
         For every simulation, it creates a new BEC.
         Then runs the simulation.
         """
-        # Run the simulations
+        # Run the simulations sequentially. For each simulation, create a new BEC and evolve it.
         for combination in self.simulation_combinations:
             simulation_name, parameters = combination
 
