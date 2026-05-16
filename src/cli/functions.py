@@ -80,11 +80,11 @@ def check_args(args, logger=None):
     """
     # Check if config file exists
     if not os.path.exists(args.config):
-        raise FileNotFoundError(f"Configuration file '{args.config}' does not exist.")
+        raise FileNotFoundError(f"Configuration file '{args.config}' does not exist in the specified path.")
 
     # Check if app file exists
     if not os.path.exists(args.app):
-        raise FileNotFoundError(f"Application file '{args.app}' does not exist.")
+        raise FileNotFoundError(f"Application file '{args.app}' does not exist in the specified path.")
 
     # Ensure --run is only executed if --check is passed
     if args.run and not args.check:

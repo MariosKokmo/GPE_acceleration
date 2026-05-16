@@ -15,9 +15,8 @@ Built on **PyTorch**, this software leverages **GPU acceleration** to perform ra
 The current implementation focuses on solutions using the phase imprinting method on quasi-2D condensates. However, the
 use of evolving potentials and the extensibility and configurability of the software make it useful for more general topological simulations in BEC even in 3D and with the classic methods of rotating potentials.
 
-The software simulates the evolution of a BEC when a topological excitation is imprinted in the condensate.
-Currently the only topological excitation supported is vortices.
-A repetitive imprinting functionality is supported.
+The software simulates the evolution of a BEC when topological excitations are imprinted in the condensate.
+Current supported excitations are **vortices** and **dark solitons**. Repetitive imprinting is supported for vortex scenarios.
 
 The vortices are assumed to be printed on the n1-n3 (i.e. x-z plane). For the simulations to have physical meaning, it is assumed that the BEC is adequately flat on the n2 (y axis) so that the vortices are assumed to not bend and traverse the whole BEC along the y axis.
 
@@ -28,6 +27,7 @@ The vortices are assumed to be printed on the n1-n3 (i.e. x-z plane). For the si
 - [Configuration](#configuration)
 - [Project Structure](#project-structure)
 - [How It Works](#how-it-works)
+- [CI/CD](#cicd)
 - [Testing](#testing)
 - [Contributing](#contributing)
 - [License](#license)
@@ -36,8 +36,12 @@ The vortices are assumed to be printed on the n1-n3 (i.e. x-z plane). For the si
 
 *   **🚀 GPU Acceleration**: Utilizes PyTorch and CUDA for massively parallelized computations on the GPU.
 *   **🌀 Vortex Imprinting**: specialized tools for imprinting phase Singularities (vortices) with configurable charge, position, and timing.
+*   **🌊 Dark Solitons**: Supports black and grey soliton imprinting with configurable position, width, axis, and imprint time.
 *   **⚡ Automated Ground State**: Automatically calculates the ground state using Imaginary Time Evolution if it doesn't exist.
 *   **🔄 Repetitive & Array Configurations**: Support for dynamic simulation scenarios defined via simple JSON arrays.
+*   **🧭 Rotating Potentials**: Includes a rotating harmonic potential with configurable rotation axis and angular frequency.
+*   **🧱 Dissipative Extensions**: Optional three-body loss and boundary absorber (CAP) support.
+*   **📐 3D Utilities**: Includes helpers for vortex rings/lines, 3D velocity, angular momentum, and density slices.
 *   **📹 Visualization**: Integrated utilities for generating videos from simulation snapshots.
 *   **📊 Flexible Configuration**: Complete control over grid resolution, trapping potentials, and simulation physics via JSON.
 
@@ -140,15 +144,34 @@ This file defines the physical system (Grid, Potential) and the specific scenari
 *   `Grid_[positive/negative]_limits`: Spatial extent of the simulation box (microns).
 *   `Grid_resolution`: Number of grid points `[Nx, Ny, Nz]`.
 *   `Trapping_frequencies`: Harmonic trap frequencies `[fx, fy, fz]` (Hz).
-*   `Potential_type`: Type of external potential (e.g., `"harmonic"`).
+*   `Potential_type`: Type of external potential (`"harmonic"`, `"constant"`, `"ramp"`, `"rampharmonic"`, `"rotating"`).
 *   `dt`: Time step (seconds).
 *   `Total_simulation_time`: Duration of simulation (seconds).
+*   `three-body-losses`: Enable/disable three-body loss term.
+
+**Optional absorber (CAP) parameters:**
+*   `Absorber_enabled`
+*   `Absorber_strength`
+*   `Absorber_start_ratio`
+*   `Absorber_power`
+*   `Absorber_tinit`
+*   `Absorber_tfinal`
 
 **Scenario Parameters (Lists for multiple runs):**
 *   `vortex_charge`: List of vortex charges to imprint.
 *   `vortex_position_[x/y]`: Initial positions of vortices.
 *   `imprint_times`: Specific times to imprint new vortices.
 *   `repetitive`: Boolean flag for repetitive imprinting modes.
+
+**Optional dark-soliton parameters:**
+*   `dark_soliton`
+*   `soliton_positions`
+*   `soliton_widths`
+*   `soliton_axes`
+*   `soliton_greyness`
+*   `soliton_imprint_time`
+
+For a detailed and complete configuration reference, see `HOW_TO_CONFIG_FILE.md`.
 
 **Example:**
 ```json
@@ -175,6 +198,11 @@ Controls application-level settings.
 }
 ```
 
+To check the configuration file locally, you can run
+```python
+python -m src.cli.baqs config_test.json appConfig.json -c -v 2
+```
+
 ## Project Structure
 
 ```
@@ -190,7 +218,7 @@ GPE_acceleration/
 │   │   ├── gpe_library.py   # Split-Step Fourier implementation
 │   │   ├── ground_state.py  # Imaginary time evolution
 │   │   ├── parameters.py    # Simulation parameter handling
-│   │   └── potentials.py    # Potential definitions (harmonic, etc.)
+│   │   └── potentials.py    # Potential definitions (incl. rotating and absorber support)
 │   ├── models/              # Simulation Data Structures
 │   │   ├── BEC.py           # Bose-Einstein Condensate object
 │   │   ├── base_BEC.py      # Abstract base class for BECs
@@ -201,6 +229,8 @@ GPE_acceleration/
 │       ├── setup_simulations.py # Simulation configuration setup
 │       └── video_creation.py   # Visualization tools
 ├── tests/                   # Unit tests
+├── .pipelines/              # CI/CD YAML pipelines
+├── .environments/           # Environment-specific pipeline variables
 ├── configuration_file.json  # Physics config
 ├── appConfig.json           # App settings
 └── requirements.txt         # Python dependencies
@@ -212,6 +242,16 @@ GPE_acceleration/
 2.  **Time Evolution**: The real-time dynamics are solved using the **Split-Step Fourier Method**.
 3.  **Vortex Imprinting**: Phase imprinting is applied to the wavefunction at specified time steps to create vortices.
 4.  **Hardware**: All dense matrix operations (FFTs, element-wise multiplications) are offloaded to the GPU via PyTorch tensors.
+
+## CI/CD
+
+This repository includes starter Azure Pipelines files:
+
+*   `.pipelines/ci.yaml`: Validation, unit tests, and package build.
+*   `.pipelines/cd.yaml`: Build + multi-stage deployment flow (dev, staging, production).
+*   `.environments/dev.yaml`, `.environments/staging.yaml`, `.environments/prod.yaml`: Environment variables/templates used by the pipelines.
+
+Before enabling CD, replace the placeholder `deployCommand` in each environment file with your real deployment command.
 
 ## Testing
 
@@ -242,8 +282,8 @@ pytest
 
 *   `test_baqs.py`: Tests the Command Line Interface (CLI) functionality.
 *   `test_BEC.py`: Tests the main `BEC` class and high-level simulation logic.
-*   `test_gpe_library.py`: Validates the core mathematical functions and split-step Fourier implementation.
-*   `test_potentials.py`: Verifies the correct generation of trapping potentials (harmonic, etc.).
+*   `test_gpe_library.py`: Validates core mathematical functions, split-step Fourier utilities, dark solitons, and 3D helper APIs.
+*   `test_potentials.py`: Verifies potential generation (harmonic/ramp/constant), plus absorber and related behavior.
 *   `test_setup_simulations.py`: Checks the configuration loading and validation logic.
 
 When contributing or adding new features, please ensure you add corresponding test cases to maintain coverage.

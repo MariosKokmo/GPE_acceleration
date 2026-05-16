@@ -1,0 +1,60 @@
+trigger:
+- main
+- develop
+
+pr:
+- main
+- develop
+
+variables:
+- template: ../.environments/dev.yaml
+
+pool:
+  vmImage: $(vmImage)
+
+stages:
+- stage: ValidateAndTest
+  displayName: Validate and Test
+  jobs:
+  - job: Test
+    displayName: Run unit tests
+    steps:
+    - task: UsePythonVersion@0
+      displayName: Use Python $(pythonVersion)
+      inputs:
+        versionSpec: $(pythonVersion)
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+      displayName: Install dependencies
+
+    - script: |
+        python -m compileall src tests
+      displayName: Syntax check
+
+    - script: |
+        python -m unittest discover -s tests -p "test_*.py" -v
+      displayName: Run unit tests
+
+- stage: Build
+  displayName: Build package artifact
+  dependsOn: ValidateAndTest
+  jobs:
+  - job: BuildArtifact
+    displayName: Build distributable
+    steps:
+    - task: UsePythonVersion@0
+      displayName: Use Python $(pythonVersion)
+      inputs:
+        versionSpec: $(pythonVersion)
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install build
+        python -m build
+      displayName: Build sdist and wheel
+
+    - publish: $(packageOutputDir)
+      displayName: Publish package artifact
+      artifact: $(artifactName)

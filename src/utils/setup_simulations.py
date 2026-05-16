@@ -14,6 +14,54 @@ import numpy as np
 from src.library.parameters import CONSTANTS
 
 
+REQUIRED_SIMULATION_CONFIG_KEYS = [
+    "Grid_resolution",
+    "Grid_negative_limits",
+    "Grid_positive_limits",
+    "Trapping_frequencies",
+    "Total_simulation_time",
+    "dt",
+    "snapshots",
+    "vortex_excitation",
+    "vortex_charge",
+    "imprinting_charge",
+    "vortex_position_x",
+    "vortex_position_y",
+    "imprint_position_x",
+    "imprint_position_y",
+    "initial_imprint_time",
+    "repetitive",
+    "imprint_every",
+    "imprint_times",
+    "max_imprints",
+    "Potential_type",
+    "SwitchOff_time",
+]
+
+REQUIRED_COMBINATION_KEYS = [
+    "imprint_every",
+    "max_imprints",
+    "vortex_charge",
+    "imprinting_charge",
+    "repetitive",
+    "vortex_position_x",
+    "vortex_position_y",
+    "vortex_excitation",
+    "initial_imprint_time",
+    "imprint_position_x",
+    "imprint_position_y",
+    "imprint_times",
+]
+
+
+def _require_keys(data, required_keys, context):
+    """Raise a ValueError when one or more required keys are missing."""
+    missing = [key for key in required_keys if key not in data]
+    if missing:
+        missing_str = ", ".join(sorted(missing))
+        raise ValueError(f"Missing required parameter(s) in {context}: {missing_str}")
+
+
 # =============================================================================
 # Configuration File Reading
 # =============================================================================
@@ -22,13 +70,18 @@ def _load_json_from_cwd(config_file):
     """Load and parse a JSON file located relative to the current working directory."""
     path_config_file = os.path.join(os.getcwd(), config_file)
 
+    if not os.path.exists(path_config_file):
+        raise FileNotFoundError(f"Configuration file not found: '{path_config_file}'")
+    if not os.path.isfile(path_config_file):
+        raise ValueError(f"Configuration path is not a file: '{path_config_file}'")
+
     try:
         with open(path_config_file, "r") as f:
             return json.load(f)
     except json.JSONDecodeError as e:
         raise ValueError(f"Failed to parse configuration file '{config_file}': {e}") from e
-    except FileNotFoundError as e:
-        raise FileNotFoundError(f"Configuration file not found: '{path_config_file}'") from e
+    except OSError as e:
+        raise OSError(f"Unable to read configuration file '{path_config_file}': {e}") from e
 
 def _read_configuration_file(config_file):
     """
@@ -137,6 +190,8 @@ def get_simulation_combinations(sims):
     AssertionError
         If parameter list lengths are inconsistent or repetitive flag is invalid.
     """
+    _require_keys(sims, REQUIRED_COMBINATION_KEYS, "simulation combinations")
+
     imprint_every = sims["imprint_every"]
     max_imprints = sims["max_imprints"]
     charges = sims["vortex_charge"]
@@ -153,6 +208,11 @@ def get_simulation_combinations(sims):
     # Optional dark-soliton parameters (shared across all simulations)
     dark_soliton_params = {}
     if sims.get("dark_soliton", False):
+        _require_keys(
+            sims,
+            ["soliton_positions", "soliton_widths", "soliton_axes"],
+            "dark soliton settings",
+        )
         dark_soliton_params = {
             "dark_soliton": True,
             "soliton_positions": sims["soliton_positions"],
@@ -327,18 +387,29 @@ def get_simulation_parameters(config_file_path):
         Error message if validation fails, empty string otherwise.
     """
     pi = CONSTANTS.pi
-    
-    # Read the configuration file
-    sim_params = _read_configuration_file(config_file_path)
+    msg = ""
+
+    try:
+        # Read the configuration file
+        sim_params = _read_configuration_file(config_file_path)
+        _require_keys(sim_params, REQUIRED_SIMULATION_CONFIG_KEYS, "simulation configuration")
+    except (FileNotFoundError, ValueError, OSError, TypeError) as e:
+        return None, f"[FATAL] {e}"
     
     # Grid parameters
-    n1, n2, n3 = sim_params["Grid_resolution"]
+    try:
+        n1, n2, n3 = sim_params["Grid_resolution"]
+    except (TypeError, ValueError) as e:
+        return None, f"[FATAL] Invalid Grid_resolution format. Expected 3 values: {e}"
     dim = np.array([n1, n2, n3], dtype=np.float64)
     x_min = np.array(sim_params["Grid_negative_limits"])
     x_max = np.array(sim_params["Grid_positive_limits"])
     
     # Trapping frequencies
-    fx, fy, fz = sim_params["Trapping_frequencies"]
+    try:
+        fx, fy, fz = sim_params["Trapping_frequencies"]
+    except (TypeError, ValueError) as e:
+        return None, f"[FATAL] Invalid Trapping_frequencies format. Expected 3 values: {e}"
     wx = 2 * pi * float(fx)
     wy = 2 * pi * float(fy)
     wz = 2 * pi * float(fz)
@@ -389,7 +460,7 @@ def get_simulation_parameters(config_file_path):
     u = 4.0 * CONSTANTS.pi * CONSTANTS.nat * CONSTANTS.ascat / a_ho 
     
     # 3-body losses
-    if bool(sim_params["three-body-losses"]):
+    if bool(sim_params.get("three-body-losses", False)):
         k3 = CONSTANTS.k3
     else:
         k3 = 0.0
@@ -654,6 +725,14 @@ def _perform_vortex_checks(simulation_params):
             
             if len(charges) != len(simulation_params["vortex_position_y"][index]):
                 msg = f"The number of charges doesn't agree with the number of y positions for simulation {index + 1}"
+                return False, msg
+
+            if len(simulation_params["vortex_position_x"][index]) == 0:
+                msg = f"The x positions list is empty for simulation {index + 1}"
+                return False, msg
+
+            if len(simulation_params["vortex_position_y"][index]) == 0:
+                msg = f"The y positions list is empty for simulation {index + 1}"
                 return False, msg
             
             if max(simulation_params["vortex_position_x"][index]) > n1 // 2:

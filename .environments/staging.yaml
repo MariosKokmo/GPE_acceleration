@@ -1,0 +1,13 @@
+variables:
+- name: environmentName
+  value: staging
+- name: pythonVersion
+  value: '3.11'
+- name: vmImage
+  value: ubuntu-latest
+- name: artifactName
+  value: baqs-package
+- name: packageOutputDir
+  value: dist
+- name: deployCommand
+  value: echo "[STAGING] Replace with your deployment command"
