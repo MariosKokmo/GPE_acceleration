@@ -1,31 +1,19 @@
-import src.application as ap
-import torch
-from src.models.system import System
-from src.models.simulation import Simulations
+import os
+import sys
+
+# Allow running this file directly (python src/run.py) by exposing project root.
+if __package__ in (None, ""):
+    _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _PROJECT_ROOT not in sys.path:
+        sys.path.insert(0, _PROJECT_ROOT)
+
+from src.simulator import Simulator
+
 
 def main(configFile="configuration_file.json", appConfigFile="appConfig.json"):
-    # Set up the application
-    app = ap.application(appConfigFile)
-    if configFile:
-        app.configFile = configFile
+    sim = Simulator(config_file=configFile, app_config_file=appConfigFile)
+    sim.run()
 
-    DEVICE = torch.device('cuda') if torch.cuda.is_available() else 'cpu'
-    app.set_device(DEVICE)
-
-    app.logger.info(f"Running on {DEVICE}.")
-
-    # Set up the external system
-    system = System(app)
-
-    # set up simulations
-    simulations = Simulations(system, app)
-
-    # run simulations 
-    simulations.run_simulations()
-    
-    # close log file and exit
-    app.reset_logger()
-    app.logger.info("Finished all simulations.")
 
 if __name__ == "__main__":
     main()

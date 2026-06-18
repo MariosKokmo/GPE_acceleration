@@ -1,4 +1,15 @@
-numpy==1.23.5
-pandas==1.5.3
-torch==2.1.0+cu118
-matplotlib==3.7.1
+# Solver dependencies — pinned for Python 3.10/3.11 (was Python 3.8).
+# Verified on Python 3.10.11.
+#
+# Rationale for the bumps:
+#   torch 2.1.0 has no cp311/cp312 CPU+modern wheels matching this stack;
+#   numpy 1.23.5 / pandas 1.5.3 / matplotlib 3.7.1 predate the target.
+# numpy is kept on the 1.26.x line (last 1.x) so we avoid the numpy 2.0 break;
+# torch 2.2.x requires numpy < 2, so this set is internally consistent.
+#
+# This machine has no CUDA -> CPU-only torch (the default PyPI Windows wheel).
+numpy==1.26.4
+pandas==2.2.3
+matplotlib==3.9.2
+opencv-python==4.10.0.84
+torch==2.2.2

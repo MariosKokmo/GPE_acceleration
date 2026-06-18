@@ -1,45 +1,139 @@
 """
-This module provides the class to build the equation of the system.
-In order to accommodate for equations with various terms.
+Equation objects for the GPE and its extensions.
+
+Each class encapsulates the real-space part of the split-step operator
+(the term that sits between the two half-kinetic steps).  Equation objects
+are created once before the simulation loop and called every iteration:
+
+    equation = GPE_base(params, system.uext)
+
+    for iteration in range(kmax):
+        t   = dt * iteration * omega_ho
+        utot = equation(psi, t)
+        psi  = split_step(psi, utot, dtau, ...)
+
+The Potential object passed in handles all time dependence via its .evol(t)
+method, so the equation itself is stateless between calls.
 """
 import torch
+from abc import ABC, abstractmethod
 
-class Equation:
-    """Class to provide the RHS equation of the system.
-    It is assume that the LHS contains only the time derivative term i dPsi/dt.
-    All other terms are included in the RHS. 
 
-    The space operator is defined as the sum of all terms that depend on the wavefunction psi and the external potential uext.
-    This is the part of the split-step Fourier algorithm that sits in the middle of the time evolution step, and is applied in real space.
+def select_equation(equation_type: str, params: dict, potential) -> "Equation":
     """
-    def __init__(self):
-        self.space_operator = None
+    Instantiate and return an Equation object by name.
+
+    Available types
+    ---------------
+    ``"gpe"``       — standard zero-temperature GPE (requires ``"u"`` in params).
+    ``"gpe_3body"`` — GPE with three-body loss (requires ``"u"`` and ``"k3"``).
+    ``"custom"``    — returns None; build a CustomEquation manually.
+
+    Args:
+        equation_type: string identifier (case-insensitive).
+        params:        simulation parameters dict.
+        potential:     Potential object whose ``.evol(t)`` returns V_ext(t).
+
+    Returns:
+        Equation instance, or None for ``"custom"``.
+    """
+    available = ["gpe", "gpe_3body", "custom"]
+    key = equation_type.strip().lower()
+    if key not in available:
+        raise ValueError(
+            f"Unknown equation type '{equation_type}'. "
+            f"Available: {available}"
+        )
+    if key == "gpe":
+        return GPE_base(params, potential)
+    if key == "gpe_3body":
+        return GPE_3body_loss(params, potential)
+    return None  # "custom": caller must construct CustomEquation directly
+
+
+class Equation(ABC):
+    """Base class for all GPE equation objects."""
+
+    @abstractmethod
+    def __call__(self, psi: torch.Tensor, t: float) -> torch.Tensor:
+        """
+        Return the real-space operator evaluated at wavefunction psi and time t.
+
+        Args:
+            psi: complex wavefunction tensor.
+            t:   current simulation time (dimensionless).
+
+        Returns:
+            torch.Tensor of the same shape as psi.
+        """
+
 
 class GPE_base(Equation):
-    def __init__(self, params, psi, uext):
-        super().__init__()
+    """
+    Standard zero-temperature GPE real-space operator.
+
+        utot = u |ψ|² + V_ext(t)
+
+    Args:
+        params:    dict containing at least ``"u"`` (interaction strength).
+        potential: Potential object whose ``.evol(t)`` returns V_ext at time t.
+    """
+
+    def __init__(self, params: dict, potential):
         try:
             self.u = params["u"]
         except KeyError:
-            raise KeyError("The interaction strength u is not provided in the parameters dictionary.")
-        self.psi = psi
-        self.uext = uext
-        self.space_operator = (self.u * torch.abs(self.psi) ** 2 + self.uext)
+            raise KeyError("params must contain 'u' (interaction strength).")
+        self.potential = potential
+
+    def __call__(self, psi: torch.Tensor, t: float) -> torch.Tensor:
+        return self.u * torch.abs(psi) ** 2 + self.potential.evol(t)
+
 
 class GPE_3body_loss(Equation):
-    def __init__(self, params, psi, uext):
-        super().__init__()
+    """
+    GPE with three-body loss.
+
+        utot = u |ψ|² + V_ext(t) − i k3 |ψ|⁴
+
+    The imaginary term drains population from high-density regions.
+
+    Args:
+        params:    dict containing ``"u"`` and ``"k3"`` (three-body loss rate).
+        potential: Potential object.
+    """
+
+    def __init__(self, params: dict, potential):
         try:
-            self.u = params["u"]
+            self.u  = params["u"]
             self.k3 = params["k3"]
         except KeyError as e:
-            raise KeyError(f"The required parameter {str(e)} is not provided in the parameters dictionary.")
-        self.psi = psi
-        self.uext = uext
-        self.loss_term = - self.k3 * torch.abs(self.psi)**4
-        self.space_operator = (self.u * torch.abs(self.psi) ** 2 + self.uext) + (1j * self.loss_term)
-        
+            raise KeyError(f"params must contain {e}.")
+        self.potential = potential
+
+    def __call__(self, psi: torch.Tensor, t: float) -> torch.Tensor:
+        density = torch.abs(psi) ** 2
+        return self.u * density + self.potential.evol(t) - 1j * self.k3 * density ** 2
+
+
 class CustomEquation(Equation):
-    def __init__(self, custom_space_operator):
-        super().__init__()
-        self.space_operator = custom_space_operator
+    """
+    Equation defined by an arbitrary callable.
+
+    The callable must accept (psi, t) and return a tensor of the same shape.
+
+    Example:
+        def my_operator(psi, t):
+            return u * torch.abs(psi)**2 + V(t)
+
+        equation = CustomEquation(my_operator)
+        utot = equation(psi, t)
+    """
+
+    def __init__(self, operator):
+        if not callable(operator):
+            raise TypeError("operator must be callable with signature (psi, t).")
+        self._operator = operator
+
+    def __call__(self, psi: torch.Tensor, t: float) -> torch.Tensor:
+        return self._operator(psi, t)

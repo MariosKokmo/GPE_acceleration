@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from .parameters import CONSTANTS
+from .common_utils import CommonUtils as cu
 
 class GPELibrary:
     @staticmethod
@@ -58,28 +59,7 @@ class GPELibrary:
 
         g_x, g_y, g_z = torch.meshgrid(x1, x2, x3)
         space_grid = (g_x.to(device=device), g_y.to(device=device), g_z.to(device=device))
-        return x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid
-
-    @staticmethod
-    def x_evolution(
-        psi1: torch.Tensor,
-        utot1: torch.Tensor,
-        dtau: float,
-        factor: float = 0.5
-    ) -> torch.Tensor:
-        """
-        Real-space evolution step for the wavefunction.
-
-        Args:
-            psi1 (torch.Tensor): Wavefunction of the system.
-            utot1 (torch.Tensor): Trapping potential at this time step.
-            dtau (float): Time evolution step.
-            factor (float, optional): Splitting factor (default 0.5).
-
-        Returns:
-            torch.Tensor: Updated wavefunction.
-        """
-        return torch.exp(-factor * dtau * 1j * utot1) * psi1
+        return x1, x2, x3, p1[0], p2[0], p3[0], p_sq, space_grid, p_grid
 
     @staticmethod
     def p_evolution(
@@ -120,55 +100,6 @@ class GPELibrary:
         return phi / torch.sqrt(d_x * torch.sum(torch.abs(phi) ** 2))
 
     @staticmethod
-    def update_phase(
-        psi1: torch.Tensor,
-        phase: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Update the phase of the wavefunction.
-
-        Args:
-            psi1 (torch.Tensor): Wavefunction of the system.
-            phase (torch.Tensor): Phase to be applied.
-
-        Returns:
-            torch.Tensor: Updated wavefunction.
-        """
-        return psi1 * torch.exp(phase * 1j)
-
-    @staticmethod
-    def extract_phase(
-        psi: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Extract the phase from the wavefunction.
-
-        Args:
-            psi (torch.Tensor): Wavefunction of the condensate.
-
-        Returns:
-            torch.Tensor: Phase of the condensate.
-        """
-        return torch.imag(torch.log(psi / torch.sqrt(torch.abs(psi) ** 2)))
-
-    @staticmethod
-    def add_phase(
-        cur_phase: torch.Tensor,
-        added_phase: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        Add an extra phase to the current phase.
-
-        Args:
-            cur_phase (torch.Tensor): Current phase of the condensate wavefunction.
-            added_phase (torch.Tensor): Additional phase to be added.
-
-        Returns:
-            torch.Tensor: Updated phase.
-        """
-        return cur_phase + added_phase
-
-    @staticmethod
     def split_step_step(
         psi1: torch.Tensor,
         utot1: torch.Tensor,
@@ -189,9 +120,9 @@ class GPELibrary:
         Returns:
             torch.Tensor: Updated wavefunction.
         """
-        psi1 = GPELibrary.x_evolution(psi1, utot1, dtau)
+        psi1 = cu.x_evolution(psi1, utot1, dtau)
         psi1 = GPELibrary.p_evolution(psi1, dtau, p_sq)
-        psi1 = GPELibrary.x_evolution(psi1, utot1, dtau)
+        psi1 = cu.x_evolution(psi1, utot1, dtau)
         return GPELibrary.normalize(psi1, d_x)
 
     @staticmethod
@@ -265,6 +196,148 @@ class GPELibrary:
             'E_total': E_total
         }
     
+    @staticmethod
+    def calculate_chemical_potential(
+        psi: torch.Tensor,
+        uext: torch.Tensor,
+        u: float,
+        p_grid: tuple,
+        d_x: float
+    ) -> float:
+        """
+        Compute the mean-field chemical potential μ = ⟨ψ|H_mf|ψ⟩.
+
+        This is used by the SGPE as the grand-canonical reservoir potential
+        that drives condensate growth (modes below μ) and decay (modes above μ).
+
+        The mean-field Hamiltonian in dimensionless units (ħ = m = ω_ho = 1) is:
+
+            H_mf = -∇²/2 + V_ext + u|ψ|²
+
+        The chemical potential is then:
+
+            μ = ⟨ψ|H_mf|ψ⟩ = e_kin + e_pot + 2·e_int
+
+        where e_int = (u/2)∫|ψ|⁴ dV.  The interaction term is counted *twice*
+        because μ = ∂E/∂N and differentiating the (u/2)N² term yields uN.
+
+        Args:
+            psi (torch.Tensor): Normalised BEC wavefunction (n1, n2, n3).
+            uext (torch.Tensor): External trapping potential on the grid.
+            u (float): Dimensionless interaction strength.
+            p_grid (tuple): (p1, p2, p3) 3-D momentum meshgrids.
+            d_x (float): Grid cell volume (product of dx in each dimension).
+
+        Returns:
+            float: Chemical potential μ in units of ħ·ω_ho.
+        """
+        energy = GPELibrary.calculate_energy_allocation(psi, uext, p_grid, u=u)
+        mu = energy['e_kin'] + energy['e_pot'] + 2.0 * energy['e_int']
+        return float(mu.real)
+
+    @staticmethod
+    def generate_thermal_noise(
+        shape: tuple,
+        gamma: float,
+        kT: float,
+        dtau: float,
+        d_x: float,
+        device: torch.device
+    ) -> torch.Tensor:
+        """
+        Generate a complex Gaussian noise field for one SGPE time step.
+
+        The SGPE noise must satisfy the fluctuation-dissipation theorem:
+
+            ⟨η*(r,t) η(r',t')⟩ = 2γ·k_BT · δ(r−r') · δ(t−t')
+
+        Discretising on a grid with cell volume δV = d_x and time step δt = dtau:
+
+            noise amplitude = √(γ · kT · dtau / d_x)
+
+        so that ⟨|Δψ_noise|²⟩ = 2·γ·kT·dtau/d_x per grid point, matching the
+        continuous fluctuation-dissipation relation.
+
+        Args:
+            shape (tuple): Grid shape (n1, n2, n3).
+            gamma (float): Dimensionless damping coefficient γ.
+            kT (float): Dimensionless temperature k_B·T / (ħ·ω_ho).
+            dtau (float): Dimensionless time step ω_ho·dt.
+            d_x (float): Grid cell volume (product of dx in each dimension).
+            device (torch.device): Computation device.
+
+        Returns:
+            torch.Tensor: Complex noise tensor of shape (n1, n2, n3).
+        """
+        amplitude = (gamma * kT * dtau / d_x) ** 0.5
+        xi_real = torch.randn(shape, dtype=torch.float64, device=device)
+        xi_imag = torch.randn(shape, dtype=torch.float64, device=device)
+        return amplitude * (xi_real + 1j * xi_imag).to(torch.cdouble)
+
+    @staticmethod
+    def sgpe_step(
+        psi: torch.Tensor,
+        utot: torch.Tensor,
+        mu: float,
+        gamma: float,
+        dtau: float,
+        p_sq: torch.Tensor,
+        d_x: float
+    ) -> torch.Tensor:
+        """
+        Perform one deterministic SGPE split-step with (1 − iγ) damping.
+
+        The SGPE modifies the GPE by replacing the purely unitary evolution
+        operator with a dissipative one:
+
+            GPE:   exp(−i · dt · H_mf)
+            SGPE:  exp(−(i + γ) · dt · (H_mf − μ))
+
+        The (i + γ) factor arises from the (1 − iγ) prefactor in the SGPE:
+
+            ∂ψ/∂t = −(i + γ)(H_mf − μ)ψ + noise
+
+        Modes with H_mf > μ are exponentially damped (energy removed to reservoir).
+        Modes with H_mf < μ are amplified (energy drawn from reservoir).
+        This drives the system toward the thermal equilibrium state at temperature T.
+
+        The split-step sequence (Strang splitting) is:
+
+            1. Real-space half-step:  ψ ← exp(−(i+γ)·Δτ/2·(V_eff − μ)) · ψ
+            2. Momentum full-step:    ψ̃ ← exp(−(i+γ)·Δτ·p²/2) · ψ̃
+            3. Real-space half-step:  ψ ← exp(−(i+γ)·Δτ/2·(V_eff − μ)) · ψ
+            4. Normalise ψ
+
+        where V_eff = u|ψ|² + V_ext is frozen at the start of the step.
+
+        Args:
+            psi (torch.Tensor): Wavefunction (n1, n2, n3), complex double.
+            utot (torch.Tensor): Total mean-field potential V_ext + u|ψ|².
+            mu (float): Reservoir chemical potential μ in units of ħ·ω_ho.
+            gamma (float): Dimensionless damping coefficient γ.
+            dtau (float): Dimensionless time step ω_ho·dt.
+            p_sq (torch.Tensor): Squared momentum grid |p|².
+            d_x (float): Grid cell volume used for normalisation.
+
+        Returns:
+            torch.Tensor: Updated, normalised wavefunction.
+        """
+        damping = 1j + gamma
+        eff_pot = utot - mu
+
+        # Real-space half-step
+        psi = torch.exp(-damping * 0.5 * dtau * eff_pot) * psi
+
+        # Momentum full-step
+        psiF = torch.fft.fftn(psi, norm='forward')
+        psiF = torch.exp(-damping * dtau * 0.5 * p_sq) * psiF
+        psi = torch.fft.ifftn(psiF, norm='forward')
+
+        # Real-space half-step
+        psi = torch.exp(-damping * 0.5 * dtau * eff_pot) * psi
+
+        return GPELibrary.normalize(psi, d_x)
+
     @staticmethod
     def calculate_density_peak(
         psi: torch.Tensor
@@ -352,7 +425,7 @@ class GPE2DLibrary(GPELibrary):
         Returns:
             torch.Tensor: Updated wavefunction.
         """
-        return GPELibrary.update_phase(psi1, repetitive_phase)
+        return cu.update_phase(psi1, repetitive_phase)
 
     @staticmethod
     def calculate_velocity2D(

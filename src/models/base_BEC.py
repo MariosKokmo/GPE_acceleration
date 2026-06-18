@@ -5,15 +5,14 @@ Extend this class and override methods as needed for custom simulations.
 """
 from typing import Optional, Dict, Any
 import logging
-from src.library.gpe_library import GPELibrary as gpe
-from src.library.gpe_library import GPE2DLibrary as gpe2d
-from src.library.ground_state import GroundState as gs
+from src.library.common_utils import CommonUtils as cu
 import src.utils.read_write_utils as rw
 from src.utils import video_creation
 import os
 import torch
 from pathlib import Path
 from sys import platform
+
 
 
 class BaseBEC:
@@ -57,7 +56,26 @@ class BaseBEC:
         self.simulation_name = simulation_name
         self.system = system
         self.gs_path: Optional[str] = None
-        
+
+        # Coordinate system: "cylindrical" when r_max is present in the config,
+        # "cartesian" otherwise.  All coordinate-dependent branches key off this.
+        self._coord = self.system._coord
+        if not self._coord:
+            raise ValueError("Coordinate system is not set in the system object.")
+
+        if self._coord == "cylindrical":
+            from src.library.gpe_cylindrical_library import GPECylindricalLibrary as _cyl
+            from src.library.ground_state_cylindrical import CylindricalGroundState as _cgs
+            self._lib = _cyl
+            self._gs_lib = _cgs
+        elif self._coord == "cartesian":
+            from src.library.gpe_library import GPELibrary as gpe
+            from src.library.gpe_library import GPE2DLibrary as gpe2d
+            from src.library.ground_state import GroundState as gs
+            self._lib = gpe
+            self._gpe2d_lib = gpe2d
+            self._gs_lib = gs
+
         # TODO: Add your custom instance variables here
         # Example:
         # self.custom_data = []
@@ -66,39 +84,45 @@ class BaseBEC:
     def _find_ground_state(self) -> None:
         """
         Finds the ground state for the BEC in the system.
-        If it exists, it just reads the file.
-        The required format is `{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat`
-        If a ground state file does not exist, it is computed.
+        If the file already exists it is loaded directly; otherwise it is computed.
+
+        Cartesian filename: ``{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat``
+        Cylindrical filename: ``{n_r}x{n_phi}x{n_z}_{fr}_{fz}Hz_ground_state_cyl.dat``
         """
         try:
             n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
-            fx, fy, fz = self.system.simulation_parameters["Trapping_frequencies"]
-        except KeyError as e:
+            freqs = self.system.simulation_parameters["Trapping_frequencies"]
+        except KeyError:
             self.logger.exception("Missing simulation parameter while finding ground state.")
             raise
 
-        # Find ground state for the specific grid and potential if it doesn't exist
         cur_path = Path(os.getcwd())
         parent_path = str(cur_path.parent.absolute())
-        
+
         try:
             os.chdir(parent_path)
-            
-            gs_file = f"{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat"
+
+            if self._coord == "cylindrical":
+                fr = freqs[0]
+                fz = freqs[-1]
+                gs_file = f"{n1}x{n2}x{n3}_{fr}_{fz}Hz_ground_state_cyl.dat"
+            else:
+                fx, fy, fz = freqs
+                gs_file = f"{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat"
+
             if not os.path.exists(gs_file):
                 self.logger.info("Calculating ground state...")
                 try:
-                    _ = gs.find_ground_state(self.parameters, self.system, gs_file, device=self.device)
-                except Exception as e:
+                    self._gs_lib.find_ground_state(self.parameters, self.system, gs_file, device=self.device)
+                except Exception:
                     self.logger.exception("Failed to calculate ground state.")
                     raise
+
             self.logger.info(f"Ground state file: {gs_file}")
-            
-            if platform == "win32":
-                self.gs_path = os.getcwd() + "\\" + gs_file
-            else:
-                self.gs_path = os.getcwd() + "/" + gs_file
-        except OSError as e:
+            sep = "\\" if platform == "win32" else "/"
+            self.gs_path = os.getcwd() + sep + gs_file
+
+        except OSError:
             self.logger.exception("File system error in _find_ground_state.")
             raise
         finally:
@@ -118,29 +142,44 @@ class BaseBEC:
             n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
             if self.gs_path is None:
                 raise ValueError("Ground state path is None after _find_ground_state")
-            self.psi = gs.read_ground_state(self.gs_path, n1, n2, n3)
+            self.psi = self._gs_lib.read_ground_state(self.gs_path, n1, n2, n3)
             self.psi = self.psi.to(self.device)
-        except Exception as e:
+        except Exception:
             self.logger.exception("Failed to initialise BEC.")
             raise
         
         # TODO: Add custom initialization if needed
         # Example: apply initial phase imprinting, modify amplitude, etc.
     
-    def _step(self, utot: torch.Tensor, dtau: float, p_sq: torch.Tensor, d_x: float) -> None:
+    def _step(self, utot: torch.Tensor, dtau: float,
+              p_sq: torch.Tensor = None, d_x: float = None) -> None:
         """
-        Performs a single time step evolution of the BEC
-        following the split-step Fourier method.
-        
+        Performs a single time step using the split-step Fourier method.
+
+        Cartesian: ``_step(utot, dtau, p_sq, d_x)`` — explicit momentum grid and
+        volume element are required.
+
+        Cylindrical: ``_step(utot, dtau)`` — the kinetic operator is applied via
+        the precomputed radial eigendecomposition stored on ``self`` (set up by
+        ``_initialize_simulation_parameters``).
+
         Args:
-            utot: torch.Tensor, total potential (interaction + external)
-            dtau: float, time step size
-            p_sq: torch.Tensor, squared momentum grid
-            d_x: float, spatial grid spacing
+            utot  : total potential (interaction + external).
+            dtau  : time step size.
+            p_sq  : squared momentum grid (Cartesian only).
+            d_x   : flat volume element (Cartesian only).
         """
         if self.psi is None:
             raise RuntimeError("BEC wavefunction (psi) is not initialized.")
-        self.psi = gpe.split_step_step(self.psi, utot, dtau, p_sq, d_x)
+        if self._coord == "cylindrical":
+            self.psi = self._lib.split_step_step(
+                self.psi, utot, dtau,
+                self.kz, self.m_modes, self.r,
+                self.eigvecs_dict, self.eigvals_dict,
+                self.dr, self.dphi, self.dz,
+            )
+        else:
+            self.psi = self._lib.split_step_step(self.psi, utot, dtau, p_sq, d_x)
     
     def _extract_phase(self) -> torch.Tensor:
         """
@@ -151,7 +190,7 @@ class BaseBEC:
         """
         if self.psi is None:
              raise RuntimeError("BEC wavefunction (psi) is not initialized.")
-        return gpe.extract_phase(self.psi)
+        return cu.extract_phase(self.psi)
 
     def evolve(self) -> None:
         """
@@ -205,28 +244,27 @@ class BaseBEC:
         """
         try:
             params = self.system.simulation_parameters
-            
-            # Time evolution parameters
-            self.kmax = params["kmax"]
-            self.dt = params["dt"]
+
+            # Time evolution parameters (shared by both coordinate systems)
+            self.kmax    = params["kmax"]
+            self.dt      = params["dt"]
             self.omega_ho = params["omega_ho"]
-            self.shots = params["shots"]
-            self.dtau = params["dtau"]
-            self.d_x = params["d_x"]
-            self.a_ho = params["a_ho"]
-            
-            # Grid parameters
-            self.p_sq = self.system.p_sq
-            self.p_grid = self.system.p_grid
-            self.x1, self.x2, self.x3 = self.system.space_axes
-            self.p1, self.p2, self.p3 = self.system.momentum_axes
+            self.shots   = params["shots"]
+            self.dtau    = params["dtau"]
+            self.a_ho    = params["a_ho"]
             self.n1, self.n2, self.n3 = params["Grid_resolution"]
-            
-            # Potential and interaction
+
+            # Potential and interaction (shared)
             if self.system.uext is None:
                 raise ValueError("External potential (uext) is None")
             self.uext = self.system.uext.potential
             self.u = params["u"]
+
+            # --- Coordinate-specific grid parameters ---
+            if self._coord == "cylindrical":
+                self._init_cylindrical_grid_params(params)
+            elif self._coord == "cartesian":
+                self._init_cartesian_grid_params(params)
 
             if self.kmax <= 0:
                 raise ValueError("kmax must be > 0")
@@ -234,14 +272,20 @@ class BaseBEC:
                 raise ValueError("shots must be >= 0")
             if self.n1 <= 0 or self.n2 <= 0 or self.n3 <= 0:
                 raise ValueError("Grid_resolution values must all be > 0")
-            
+
             # Measurement arrays
+            # cross_line stores a 1-D density profile per snapshot:
+            #   Cartesian  → n(x) at fixed y,z  (length n1)
+            #   Cylindrical → n(r) at fixed z   (length n_r = n1)
             self.rms_measurements = {}
             self.cross_line = torch.zeros(self.shots, self.n1)
             self.energies = []
-            
+
             # TODO: Call custom parameter initialization
             self._initialize_custom_parameters()
+
+            # Dark-soliton parameters (shared by all subclasses; Cartesian only).
+            self._initialize_dark_soliton_parameters()
         except KeyError as e:
             self.logger.exception("Missing simulation parameter during initialization.")
             raise
@@ -255,9 +299,9 @@ class BaseBEC:
     def _initialize_custom_parameters(self) -> None:
         """
         Initialize custom simulation-specific parameters.
-        
+
         Override this method in your derived class to set up additional parameters.
-        
+
         Example:
             def _initialize_custom_parameters(self):
                 self.my_custom_param = self.parameters.get("my_param", default_value)
@@ -265,6 +309,142 @@ class BaseBEC:
         """
         # TODO: Add your custom parameter initialization here
         pass
+
+    # ------------------------------------------------------------------
+    # Dark-soliton imprinting — shared by every BaseBEC subclass
+    # (FiniteTempBEC, ZNGBEC, ...). Cartesian only; cylindrical geometry
+    # has no soliton library. BEC has its own standalone implementation.
+    # ------------------------------------------------------------------
+    def _initialize_dark_soliton_parameters(self) -> None:
+        """
+        Read this simulation's dark-soliton parameters from ``self.parameters``.
+
+        Dark solitons are configured per simulation (one flat list of values for
+        this simulation), enabled by the global ``dark_soliton`` flag. Sets
+        ``self._soliton_enabled`` / ``self._soliton_imprinted``, which the
+        per-iteration hook :meth:`_maybe_imprint_solitons` keys off. Supported
+        only for Cartesian grids.
+        """
+        self._soliton_enabled = False
+        self._soliton_imprinted = False
+
+        if not self.parameters.get("dark_soliton", False):
+            return
+        if self._coord != "cartesian":
+            self.logger.warning(
+                "Dark solitons are only supported in Cartesian coordinates; "
+                "skipping soliton imprinting for this simulation."
+            )
+            return
+
+        positions = self.parameters.get("soliton_positions")
+        if not positions:
+            return  # this simulation imprints no soliton
+
+        self.soliton_positions = positions
+        self.soliton_widths = self.parameters.get("soliton_widths")
+        self.soliton_axes = self.parameters.get("soliton_axes")
+        self.soliton_greyness = self.parameters.get("soliton_greyness", None)
+        self.soliton_imprint_time = self.parameters.get("soliton_imprint_time", 0)
+        self._soliton_enabled = True
+        self.logger.info(
+            f"Dark soliton configured: {len(self.soliton_positions)} soliton(s), "
+            f"imprint at snapshot {self.soliton_imprint_time}"
+        )
+
+    def _imprint_dark_solitons(self) -> None:
+        """Create and apply this simulation's dark-soliton mask to the wavefunction."""
+        if self.psi is None:
+            raise RuntimeError("BEC wavefunction (psi) is not initialized.")
+        try:
+            x1, _, x3 = self.system.space_axes
+            mask = self._gpe2d_lib.create_dark_soliton(
+                x1, x3,
+                self.n1, self.n2, self.n3,
+                positions=self.soliton_positions,
+                widths=self.soliton_widths,
+                axes=self.soliton_axes,
+                greyness=self.soliton_greyness,
+                device=self.device,
+            )
+            self.psi = self._gpe2d_lib.imprint_dark_soliton(self.psi, mask)
+            self._soliton_imprinted = True
+            self.logger.info("Dark soliton(s) imprinted successfully.")
+        except Exception:
+            self.logger.exception("Error imprinting dark solitons.")
+            raise
+
+    def _maybe_imprint_solitons(self, iteration: int) -> None:
+        """
+        Imprint this simulation's solitons when the loop reaches the configured
+        snapshot. Safe no-op when solitons are disabled or already imprinted.
+
+        Subclasses that override :meth:`_main_simulation_loop` should call this
+        once per iteration to inherit dark-soliton support.
+        """
+        if not getattr(self, "_soliton_enabled", False) or self._soliton_imprinted:
+            return
+        interval = self._get_snapshot_interval()
+        if interval is None:
+            return
+        if iteration == interval * self.soliton_imprint_time:
+            self._imprint_dark_solitons()
+
+    # ------------------------------------------------------------------
+    # Grid helpers called from _initialize_simulation_parameters
+    # ------------------------------------------------------------------
+
+    def _init_cartesian_grid_params(self, params: dict) -> None:
+        """Load Cartesian grid objects from the system object."""
+        self.p_sq  = self.system.p_sq
+        self.p_grid = self.system.p_grid
+        self.x1, self.x2, self.x3 = self.system.space_axes
+        self.p1, self.p2, self.p3 = self.system.momentum_axes
+        self.dx  = params["dx"]
+        self.d_x = params["d_x"]
+
+    def _init_cylindrical_grid_params(self, params: dict) -> None:
+        """
+        Build or load cylindrical grid objects.
+
+        If the system object already carries pre-built cylindrical grid
+        attributes (``system.r``, ``system.kz``, etc.) they are reused directly.
+        Otherwise the grid is built from the scalar parameters in ``params``.
+
+        Sets the following instance attributes:
+            r, phi, z          – 1-D coordinate arrays
+            kz, m_modes        – spectral grids
+            dr, dphi, dz       – spacings
+            eigvecs_dict, eigvals_dict – precomputed radial kinetic eigendecomp
+            n_r, n_phi, n_z    – dimensional aliases (same objects as n1, n2, n3)
+        """
+        self.n_r   = self.n1
+        self.n_phi = self.n2
+        self.n_z   = self.n3
+
+        if getattr(self.system, "r", None) is not None:
+            # System has pre-built cylindrical grid
+            self.r       = self.system.r
+            self.phi     = self.system.phi
+            self.z       = self.system.z
+            self.kz      = self.system.kz
+            self.m_modes = self.system.m_modes
+            self.dr      = self.system.dr
+            self.dphi    = self.system.dphi
+            self.dz      = self.system.dz
+            self.eigvecs_dict = self.system.eigvecs_dict
+            self.eigvals_dict = self.system.eigvals_dict
+        else:
+            # Build from scalar params
+            (self.r, self.phi, self.z,
+             self.kz, self.m_modes,
+             self.dr, self.dphi, self.dz, _) = self._lib.init_grid(
+                params["r_max"], params["z_min"], params["z_max"],
+                self.n_r, self.n_phi, self.n_z, self.device,
+            )
+            self.eigvecs_dict, self.eigvals_dict = self._lib.build_radial_operators(
+                self.r, self.dr, self.m_modes, self.device
+            )
 
     def _main_simulation_loop(self) -> None:
         """
@@ -294,10 +474,10 @@ class BaseBEC:
             for iteration in range(self.kmax):
                 # Current time
                 t = self.dt * iteration * self.omega_ho
-                
-                # Total potential: interaction + external
+
+                # Recompute total potential from the current psi and uext
                 utot = self.u * torch.abs(self.psi) ** 2 + self.uext
-                
+
                 # Save data at regular intervals
                 if (
                     snapshot_interval is not None
@@ -306,7 +486,10 @@ class BaseBEC:
                 ):
                     self._write_iteration_data(count, t)
                     count += 1
-                
+
+                # Imprint dark solitons at the configured snapshot (no-op if disabled)
+                self._maybe_imprint_solitons(iteration)
+
                 # TODO: Add custom physics here
                 # Examples:
                 # - if iteration == special_time:
@@ -314,9 +497,17 @@ class BaseBEC:
                 # - if some_condition(t):
                 #     self._modify_potential()
                 # - Adaptive measurements based on system state
-                
+
                 # Perform time step
-                self._step(utot, self.dtau, self.p_sq, self.d_x)
+                # Cartesian: passes p_sq / d_x explicitly.
+                # Cylindrical: _step reads the kinetic operators from self.*.
+                if self._coord == "cylindrical":
+                    self._step(utot, self.dtau)
+                else:
+                    self._step(utot, self.dtau, self.p_sq, self.d_x)
+
+                # Advance time-dependent external potential so next iteration
+                # picks up the updated uext when computing utot.
                 if hasattr(self.system.uext, 'evol'):
                     self.uext = self.system.uext.evol(t)
             
@@ -351,28 +542,10 @@ class BaseBEC:
             return
 
         try:
-            # Write density data
-            rw.write_data(self.psi, count, self.x1, self.x3, self.n1, self.n3, self.a_ho)
-            
-            # Optional: save phase imaging
-            if hasattr(self.app, 'phase_imaging') and self.app.phase_imaging:
-                cur_phase = self._extract_phase()
-                rw.save_figure_phase(cur_phase, count)
-            
-            # Calculate and store RMS radius
-            rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
-            self.rms_measurements[count] = rms
-            
-            # Calculate cross-section line density
-            self.cross_line[count, :] = gpe2d.calculate_cross_section_line(self.psi)
-            
-            # Calculate energy allocation
-            self.energies.append(
-                gpe.calculate_energy_allocation(self.psi, self.uext, self.p_grid, {"u": self.u})
-            )
-            
-            # Log progress
-            self.logger.info(f"t = {t / self.omega_ho}")
+            if self._coord == "cylindrical":
+                self._write_iteration_data_cylindrical(count, t)
+            elif self._coord == "cartesian":
+                self._write_iteration_data_cartesian(count, t)
         except Exception as e:
             self.logger.exception(f"Error writing iteration data at step {count}.")
             raise
@@ -382,6 +555,56 @@ class BaseBEC:
         # - self.custom_observable[count] = self._calculate_custom_quantity()
         # - self._check_convergence_criteria()
         # - self._save_special_diagnostic(count)
+
+    def _write_iteration_data_cartesian(self, count: int, t: float) -> None:
+        """Snapshot diagnostics for a Cartesian (x, y, z) grid."""
+        rw.write_data(self.psi, count, self.x1, self.x3, self.n1, self.n3, self.a_ho, self.dx)
+
+        if hasattr(self.app, 'phase_imaging') and self.app.phase_imaging:
+            rw.save_figure_phase(self._extract_phase(), count)
+
+        rms = self._gpe2d_lib.rms_radius(self.psi, self.system.center, self.system.space_grid)
+        self.rms_measurements[count] = rms
+
+        self.cross_line[count, :] = self._gpe2d_lib.calculate_cross_section_line(self.psi)
+
+        self.energies.append(
+            self._lib.calculate_energy_allocation(
+                self.psi, self.uext, (self.p1, self.p2, self.p3), u=self.u
+            )
+        )
+        self.logger.info(f"t = {t / self.omega_ho}")
+
+    def _write_iteration_data_cylindrical(self, count: int, t: float) -> None:
+        """Snapshot diagnostics for a cylindrical (r, φ, z) grid."""
+        # Column density n(r, z) = ∫|ψ|² dφ
+        rw.write_data_cylindrical(
+            self.psi, count, self.r, self.phi, self.n_r, self.n_phi, self.a_ho, self.dz
+        )
+
+        # Optional phase imaging at the φ = 0 cross-section
+        if hasattr(self.app, 'phase_imaging') and self.app.phase_imaging:
+            rw.save_figure_phase_cylindrical(self._extract_phase(), count)
+
+        # RMS radius ⟨r²⟩^½ with cylindrical volume element r dr dφ dz
+        rms = self._lib.rms_radius(self.psi, self.r, self.dr, self.dphi, self.dz)
+        self.rms_measurements[count] = rms
+
+        # Radial density profile at z-midplane: n(r) = Σ_φ |ψ[:, :, n_z//2]|² · dφ
+        self.cross_line[count, :] = (
+            torch.sum(torch.abs(self.psi[:, :, self.n_z // 2]) ** 2, dim=1) * self.dphi
+        )
+
+        # Energy with cylindrical volume element
+        self.energies.append(
+            self._lib.calculate_energy_allocation(
+                self.psi, self.uext,
+                self.r, self.dr, self.dphi, self.dz,
+                self.kz, self.m_modes,
+                u=self.u,
+            )
+        )
+        self.logger.info(f"t = {t / self.omega_ho}")
 
     def _write_simulation_outputs(self) -> None:
         """
@@ -405,20 +628,37 @@ class BaseBEC:
             rw.write_energy_terms(self.energies, "energies.txt")
             
             # Create visualization videos
-            video_creation.create_video(
-                count=len(self.rms_measurements), 
-                simulation_name=self.simulation_name, 
-                n1=self.n1, 
-                n3=self.n3
-            )
-            
-            if hasattr(self.app, 'write_velocity') and self.app.write_velocity:
-                video_creation.create_velocity_video(
-                    len(self.rms_measurements), 
-                    self.simulation_name, 
-                    self.n1, 
-                    self.n3
+            n_frames = len(self.rms_measurements)
+            if self._coord == "cylindrical":
+                video_creation.create_video_cylindrical(
+                    count=n_frames,
+                    simulation_name=self.simulation_name,
+                    n_r=self.n_r,
+                    n_phi=self.n_phi,
                 )
+            else:
+                video_creation.create_video(
+                    count=n_frames,
+                    simulation_name=self.simulation_name,
+                    n1=self.n1,
+                    n3=self.n3,
+                )
+
+            if hasattr(self.app, 'write_velocity') and self.app.write_velocity:
+                if self._coord == "cylindrical":
+                    video_creation.create_velocity_video_cylindrical(
+                        n_frames,
+                        self.simulation_name,
+                        self.n_r,
+                        self.n_phi,
+                    )
+                else:
+                    video_creation.create_velocity_video(
+                        n_frames,
+                        self.simulation_name,
+                        self.n1,
+                        self.n3,
+                    )
             
             # TODO: Write custom outputs
             self._write_custom_outputs()

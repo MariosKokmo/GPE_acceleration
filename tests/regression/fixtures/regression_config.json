@@ -1,0 +1,23 @@
+{
+    "Grid_positive_limits": [10, 10, 10],
+    "Grid_negative_limits": [-10, -10, -10],
+    "Grid_resolution": [32, 32, 32],
+    "Trapping_frequencies": [100.0, 100.0, 10.0],
+    "Potential_type": "harmonic",
+    "SwitchOff_time": null,
+    "Total_simulation_time": 0.001,
+    "dt": 1e-5,
+    "snapshots": 5,
+    "vortex_excitation": 1,
+    "repetitive": 1,
+    "vortex_charge": [[1], [2]],
+    "imprinting_charge": [[[1]], [[1, 2]]],
+    "vortex_position_x": [[-2], [0]],
+    "vortex_position_y": [[0], [0]],
+    "initial_imprint_time": [0, 0],
+    "imprint_position_x": [[[-2]], [[0, 0]]],
+    "imprint_position_y": [[[0]], [[0, 0]]],
+    "imprint_every": [[], []],
+    "imprint_times": [[3], [4, 5]],
+    "max_imprints": [1, 2]
+}

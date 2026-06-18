@@ -1,19 +1,14 @@
 """
 Utilities for setting up and configuring GPE simulations.
 
-This module provides functions for reading configuration files, setting up simulation
+This module provides common functions for reading configuration files, setting up simulation
 parameters, validating inputs, and creating simulation directories.
 """
 
 import json
-import math
 import os
 
-import numpy as np
-
-from src.library.parameters import CONSTANTS
-
-
+# minimum required for all simulations
 REQUIRED_SIMULATION_CONFIG_KEYS = [
     "Grid_resolution",
     "Grid_negative_limits",
@@ -22,23 +17,21 @@ REQUIRED_SIMULATION_CONFIG_KEYS = [
     "Total_simulation_time",
     "dt",
     "snapshots",
-    "vortex_excitation",
-    "vortex_charge",
-    "imprinting_charge",
-    "vortex_position_x",
-    "vortex_position_y",
-    "imprint_position_x",
-    "imprint_position_y",
-    "initial_imprint_time",
-    "repetitive",
-    "imprint_every",
-    "imprint_times",
-    "max_imprints",
     "Potential_type",
     "SwitchOff_time",
 ]
 
-REQUIRED_COMBINATION_KEYS = [
+# minimum required for vortex excitation settings (when vortex_excitation is True)
+REQUIRED_VORTEX_KEYS = [
+    "vortex_excitation",
+    "vortex_charge",
+    "vortex_position_x",
+    "vortex_position_y",
+    "initial_imprint_time",
+]
+
+# required for repetitive imprinting scenarios (when repetitive is 1)
+REQUIRED_REPETITIVE_IMPRINTING_KEYS = [
     "imprint_every",
     "max_imprints",
     "vortex_charge",
@@ -83,29 +76,6 @@ def _load_json_from_cwd(config_file):
     except OSError as e:
         raise OSError(f"Unable to read configuration file '{path_config_file}': {e}") from e
 
-def _read_configuration_file(config_file):
-    """
-    Read the simulation configuration file.
-    
-    Parameters
-    ----------
-    config_file : str
-        Path to the configuration file relative to the current working directory.
-    
-    Returns
-    -------
-    dict
-        Dictionary containing the simulation configuration parameters.
-    
-    Raises
-    ------
-    ValueError
-        If the configuration file cannot be parsed as valid JSON.
-    FileNotFoundError
-        If the configuration file does not exist.
-    """
-    return _load_json_from_cwd(config_file)
-
 
 def get_application_config(config_file="appConfig.json"):
     """
@@ -148,11 +118,65 @@ def _format_name_component(values):
 
 def _ensure_simulation_directory(simulation_name):
     """Create a simulation directory when missing and log directory status."""
-    print("creating folder: ", simulation_name)
     if not os.path.isdir(simulation_name):
+        print("creating folder: ", simulation_name)
         os.mkdir(simulation_name)
     else:
         print(f"{simulation_name} folder already exists...data will be overwritten")
+
+def _validate_soliton_lengths(sims, n_sims):
+    """
+    Ensure per-simulation dark-soliton lists have one entry per simulation.
+
+    Dark solitons are configured per simulation (mirroring the vortex lists):
+    ``soliton_positions``/``soliton_widths``/``soliton_axes`` are required and
+    must have exactly ``n_sims`` entries; ``soliton_greyness`` and
+    ``soliton_imprint_time`` are optional but, when given, must match too.
+    """
+    for key in ("soliton_positions", "soliton_widths", "soliton_axes"):
+        value = sims.get(key)
+        if not isinstance(value, list) or len(value) != n_sims:
+            raise ValueError(
+                f"'{key}' must be a list with one entry per simulation "
+                f"({n_sims}); dark solitons are configured per simulation."
+            )
+    for key in ("soliton_greyness", "soliton_imprint_time"):
+        value = sims.get(key)
+        if isinstance(value, list) and len(value) != n_sims:
+            raise ValueError(
+                f"'{key}', when given, must have one entry per simulation ({n_sims})."
+            )
+
+
+def _dark_soliton_params_for_sim(sims, index):
+    """
+    Per-simulation dark-soliton parameters for simulation ``index``.
+
+    Returns ``{}`` when dark solitons are disabled or simulation ``index`` has
+    no solitons (an empty position list for that simulation).
+    """
+    if not sims.get("dark_soliton", False):
+        return {}
+
+    def _slice(key, default):
+        value = sims.get(key)
+        if not isinstance(value, list) or index >= len(value):
+            return default
+        return value[index]
+
+    positions = _slice("soliton_positions", [])
+    if not positions:
+        return {}  # this simulation imprints no solitons
+
+    return {
+        "dark_soliton": True,
+        "soliton_positions": positions,
+        "soliton_widths": _slice("soliton_widths", []),
+        "soliton_axes": _slice("soliton_axes", []),
+        "soliton_greyness": _slice("soliton_greyness", None),
+        "soliton_imprint_time": _slice("soliton_imprint_time", 0),
+    }
+
 
 def get_simulation_combinations(sims):
     """
@@ -190,90 +214,121 @@ def get_simulation_combinations(sims):
     AssertionError
         If parameter list lengths are inconsistent or repetitive flag is invalid.
     """
-    _require_keys(sims, REQUIRED_COMBINATION_KEYS, "simulation combinations")
 
-    imprint_every = sims["imprint_every"]
-    max_imprints = sims["max_imprints"]
-    charges = sims["vortex_charge"]
-    imprinting_charge = sims["imprinting_charge"]
-    repetitive = sims["repetitive"]
-    vortex_position_x = sims["vortex_position_x"]
-    vortex_position_y = sims["vortex_position_y"]
-    vortex_excitation = sims["vortex_excitation"]
-    initial_imprint_time = sims["initial_imprint_time"]
-    imprint_position_x = sims["imprint_position_x"]
-    imprint_position_y = sims["imprint_position_y"]
-    imprint_times = sims["imprint_times"]
+    # Finite-temperature parameters — shared across all simulation combinations.
+    # Passed through so that BaseBEC subclasses can read them from self.parameters.
+    finite_temp_params = {
+        "model_type": sims.get("model_type", "BEC"),
+        "temperature": sims.get("temperature", 0.0),
+        "damping_coefficient": sims.get("damping_coefficient", 0.03),
+        "n_test_particles": sims.get("n_test_particles", 10_000),
+        "gamma_12": sims.get("gamma_12", 0.1),
+        "chemical_potential": sims.get("chemical_potential", None),
+        "enable_c22": sims.get("enable_c22", False),
+    }
 
-    # Optional dark-soliton parameters (shared across all simulations)
-    dark_soliton_params = {}
-    if sims.get("dark_soliton", False):
+    # Dark solitons are configured per simulation (mirroring the vortex lists),
+    # so they are sliced per-simulation inside the loops below via
+    # _dark_soliton_params_for_sim rather than shared globally.
+    dark_soliton_enabled = bool(sims.get("dark_soliton", False))
+
+    simulations = []
+    vortex_excitation = sims.get("vortex_excitation", False)
+    if vortex_excitation:
         _require_keys(
             sims,
-            ["soliton_positions", "soliton_widths", "soliton_axes"],
-            "dark soliton settings",
+            REQUIRED_VORTEX_KEYS,
+            "vortex excitation settings",
         )
-        dark_soliton_params = {
-            "dark_soliton": True,
-            "soliton_positions": sims["soliton_positions"],
-            "soliton_widths": sims["soliton_widths"],
-            "soliton_axes": sims["soliton_axes"],
-            "soliton_greyness": sims.get("soliton_greyness", None),
-            "soliton_imprint_time": sims.get("soliton_imprint_time", 0),
-        }
+        vortex_position_x = sims["vortex_position_x"]
+        vortex_position_y = sims["vortex_position_y"]
+        initial_imprint_time = sims["initial_imprint_time"]
+        charges = sims["vortex_charge"]
+
+        # When solitons are also enabled they must be given for each simulation.
+        if dark_soliton_enabled:
+            _require_keys(sims, ["soliton_positions", "soliton_widths", "soliton_axes"],
+                          "dark soliton settings")
+            _validate_soliton_lengths(sims, len(charges))
+
+        repetitive = sims.get("repetitive", None)
+        if repetitive is not None:
+            _require_keys(sims, REQUIRED_REPETITIVE_IMPRINTING_KEYS, "repetitive imprinting settings")
+            imprint_every = sims["imprint_every"]
+            max_imprints = sims["max_imprints"]
+            imprinting_charge = sims["imprinting_charge"]
+            imprint_position_x = sims["imprint_position_x"]
+            imprint_position_y = sims["imprint_position_y"]
+            imprint_times = sims["imprint_times"]
+
+        if repetitive is not None and repetitive not in (0, 1):
+            raise ValueError("repetitive must be 0 or 1")
     
-    if repetitive not in (0, 1):
-        raise ValueError("repetitive must be 0 or 1")
-    
-    if repetitive:
-        max_imprints = sims['max_imprints']
-        if len(max_imprints) < 1:
-            raise ValueError("max_imprints is not correct in configuration file")
-        if len(charges) != len(imprint_every):
-            raise ValueError("charges and imprint_every have different number of values")
-        if len(charges) != len(max_imprints):
-            raise ValueError("charges and max_imprints have different number of values")
-        
-        parameters_repetitive = []
-        for i in range(len(charges)):
-            sim_params_i = {
-                "vortex_charge": charges[i],
-                "vortex_position_x": vortex_position_x[i],
-                "vortex_position_y": vortex_position_y[i],
-                "max_imprints": max_imprints[i],
-                "imprint_every": imprint_every[i],
-                "repetitive": repetitive,
-                "imprinting_charge": imprinting_charge[i],
-                "imprint_position_x": imprint_position_x[i],
-                "imprint_position_y": imprint_position_y[i],
-                "imprint_times": imprint_times[i],
-                "initial_imprint_time": initial_imprint_time[i],
-                "vortex_excitation": vortex_excitation
-            }
-            sim_params_i.update(dark_soliton_params)
-            parameters_repetitive.append(sim_params_i)
-        simulations = _simulations_repetitive(parameters_repetitive)
-    else:
-        parameters_multi_vortex = []
-        for i in range(len(charges)):
-            sim_params_i = {
-                "vortex_charge": charges[i],
-                "vortex_position_x": vortex_position_x[i],
-                "vortex_position_y": vortex_position_y[i],
-                "max_imprints": 0,
-                "imprint_every": 0,
-                "repetitive": repetitive,
-                "initial_imprint_time": initial_imprint_time[i],
-                "imprinting_charge": [],
-                "imprint_position_x": [],
-                "imprint_position_y": [],
-                "vortex_excitation": vortex_excitation,
-                "imprint_times": []
-            }
-            sim_params_i.update(dark_soliton_params)
-            parameters_multi_vortex.append(sim_params_i)
-        simulations = _simulations_multi_vortex(parameters_multi_vortex)
-    
+        if repetitive:
+            if len(max_imprints) < 1:
+                raise ValueError("max_imprints is not correct in configuration file")
+            if len(charges) != len(imprint_every):
+                raise ValueError("charges and imprint_every have different number of values")
+            if len(charges) != len(max_imprints):
+                raise ValueError("charges and max_imprints have different number of values")
+            
+            parameters_repetitive = []
+            for i in range(len(charges)):
+                sim_params_i = {
+                    "vortex_charge": charges[i],
+                    "vortex_position_x": vortex_position_x[i],
+                    "vortex_position_y": vortex_position_y[i],
+                    "max_imprints": max_imprints[i],
+                    "imprint_every": imprint_every[i],
+                    "repetitive": repetitive,
+                    "imprinting_charge": imprinting_charge[i],
+                    "imprint_position_x": imprint_position_x[i],
+                    "imprint_position_y": imprint_position_y[i],
+                    "imprint_times": imprint_times[i],
+                    "initial_imprint_time": initial_imprint_time[i],
+                    "vortex_excitation": vortex_excitation
+                }
+                sim_params_i.update(_dark_soliton_params_for_sim(sims, i))
+                sim_params_i.update(finite_temp_params)
+                parameters_repetitive.append(sim_params_i)
+            simulations = _simulations_repetitive(parameters_repetitive)
+        else:
+            parameters_multi_vortex = []
+            for i in range(len(charges)):
+                sim_params_i = {
+                    "vortex_charge": charges[i],
+                    "vortex_position_x": vortex_position_x[i],
+                    "vortex_position_y": vortex_position_y[i],
+                    "max_imprints": 0,
+                    "imprint_every": 0,
+                    "repetitive": repetitive,
+                    "initial_imprint_time": initial_imprint_time[i],
+                    "imprinting_charge": [],
+                    "imprint_position_x": [],
+                    "imprint_position_y": [],
+                    "vortex_excitation": vortex_excitation,
+                    "imprint_times": []
+                }
+                sim_params_i.update(_dark_soliton_params_for_sim(sims, i))
+                sim_params_i.update(finite_temp_params)
+                parameters_multi_vortex.append(sim_params_i)
+            simulations = _simulations_multi_vortex(parameters_multi_vortex)
+
+    elif dark_soliton_enabled:
+        # Dark-soliton-only run (no vortices). One simulation per entry in the
+        # per-simulation soliton lists.
+        _require_keys(sims, ["soliton_positions", "soliton_widths", "soliton_axes"],
+                      "dark soliton settings")
+        n_sims = len(sims["soliton_positions"])
+        _validate_soliton_lengths(sims, n_sims)
+        soliton_sims = []
+        for i in range(n_sims):
+            sim_params_i = {"vortex_excitation": 0, "repetitive": 0}
+            sim_params_i.update(finite_temp_params)
+            sim_params_i.update(_dark_soliton_params_for_sim(sims, i))
+            soliton_sims.append(sim_params_i)
+        simulations = _simulations_dark_soliton(soliton_sims)
+
     return simulations
 
 
@@ -299,8 +354,6 @@ def _simulations_repetitive(parameters_list):
     for parameters in parameters_list:
         charges = parameters["vortex_charge"]
         imprinting_charge = parameters["imprinting_charge"]
-        max_imprints = parameters["max_imprints"]
-        imprint_every = parameters["imprint_every"]
         
         if isinstance(charges, list):
             number_charges = len(charges)
@@ -343,13 +396,13 @@ def _simulations_multi_vortex(parameters_list):
     
     for parameters in parameters_list:
         charges = parameters["vortex_charge"]
-        all_charges = "_".join([str(c) for c in charges if c != " "])
-        
+        all_charges = _format_name_component(charges)
+
         vortex_position_x = parameters["vortex_position_x"]
-        vortex_position_x_str = "_".join([str(x) for x in vortex_position_x if x != " "])
-        
+        vortex_position_x_str = _format_name_component(vortex_position_x)
+
         vortex_position_y = parameters["vortex_position_y"]
-        vortex_position_y_str = "_".join([str(y) for y in vortex_position_y if y != " "])
+        vortex_position_y_str = _format_name_component(vortex_position_y)
         
         simulation_name = (
             f"{len(charges)}vortex_charges{all_charges}__"
@@ -362,174 +415,30 @@ def _simulations_multi_vortex(parameters_list):
     return simulations
 
 
-
-# =============================================================================
-# Parameter Processing
-# =============================================================================
-
-def get_simulation_parameters(config_file_path):
+def _simulations_dark_soliton(parameters_list):
     """
-    Read and process simulation parameters from configuration file.
-    
-    This function reads the configuration file, calculates derived parameters
-    (normalizations, grid spacing, etc.), and validates the resulting parameters.
-    
+    Build dark-soliton-only simulations (no vortex excitation), one per entry.
+
     Parameters
     ----------
-    config_file_path : str
-        Path to the configuration file.
-    
+    parameters_list : list of dict
+        One dict per simulation, each carrying that simulation's dark-soliton
+        settings (and finite-temperature settings) with ``vortex_excitation`` 0.
+
     Returns
     -------
-    simulation_params : dict or None
-        Dictionary containing all simulation parameters. Returns None if validation fails.
-    msg : str
-        Error message if validation fails, empty string otherwise.
+    list of list
+        ``[[simulation_name, parameters], ...]`` — one entry per simulation.
     """
-    pi = CONSTANTS.pi
-    msg = ""
-
-    try:
-        # Read the configuration file
-        sim_params = _read_configuration_file(config_file_path)
-        _require_keys(sim_params, REQUIRED_SIMULATION_CONFIG_KEYS, "simulation configuration")
-    except (FileNotFoundError, ValueError, OSError, TypeError) as e:
-        return None, f"[FATAL] {e}"
-    
-    # Grid parameters
-    try:
-        n1, n2, n3 = sim_params["Grid_resolution"]
-    except (TypeError, ValueError) as e:
-        return None, f"[FATAL] Invalid Grid_resolution format. Expected 3 values: {e}"
-    dim = np.array([n1, n2, n3], dtype=np.float64)
-    x_min = np.array(sim_params["Grid_negative_limits"])
-    x_max = np.array(sim_params["Grid_positive_limits"])
-    
-    # Trapping frequencies
-    try:
-        fx, fy, fz = sim_params["Trapping_frequencies"]
-    except (TypeError, ValueError) as e:
-        return None, f"[FATAL] Invalid Trapping_frequencies format. Expected 3 values: {e}"
-    wx = 2 * pi * float(fx)
-    wy = 2 * pi * float(fy)
-    wz = 2 * pi * float(fz)
-    w = np.array([wx, wy, wz])
-    omega_ho = (wx * wy * wz) ** (1 / 3)
-    
-    # Time step parameters
-    t_evol = sim_params["Total_simulation_time"]
-    dt = sim_params["dt"]
-    shots = sim_params["snapshots"]
-    dtau = omega_ho * dt
-    kmax = int(t_evol // dt)
-    
-    # Vortex parameters
-    vortex_excitation = sim_params["vortex_excitation"]
-    vortex_charge = sim_params["vortex_charge"]
-    imprinting_charge = sim_params["imprinting_charge"]
-    vortex_position_x = sim_params["vortex_position_x"]
-    vortex_position_y = sim_params["vortex_position_y"]
-    imprint_position_x = sim_params["imprint_position_x"]
-    imprint_position_y = sim_params["imprint_position_y"]
-    initial_imprint_time = sim_params["initial_imprint_time"]
-    
-    # Re-imprinting parameters
-    repetitive = sim_params["repetitive"]
-    imprint_every = sim_params["imprint_every"]
-    imprint_times = sim_params["imprint_times"]
-    max_imprints = sim_params["max_imprints"]
-
-    # Validate repetitive imprinting configuration
-    if repetitive and (len(imprint_every) != len(imprint_times)):
-        msg = ("[FATAL]. imprint_every and imprint_times have different number of simulations. "
-               "Make sure you write an empty list [] when not using exact times.")
-        return None, msg
-    
-    # Calculate imprint times if not explicitly provided
-    if repetitive:
-        for i in range(len(imprinting_charge)):
-            # For every simulation (i.e., charge), set the imprint times if not given
-            if len(imprint_times[i]) == 0:
-                time_step = imprint_every[i]
-                imprint_times[i] = [time_step * j for j in range(1, max_imprints[i] + 1)]
-    
-    # Calculate harmonic oscillator length scale in meters
-    a_ho = math.sqrt(CONSTANTS.hbar / CONSTANTS.m1 / omega_ho)  
-    
-    # Interaction strength
-    u = 4.0 * CONSTANTS.pi * CONSTANTS.nat * CONSTANTS.ascat / a_ho 
-    
-    # 3-body losses
-    if bool(sim_params.get("three-body-losses", False)):
-        k3 = CONSTANTS.k3
-    else:
-        k3 = 0.0
-
-    # Optional absorber (complex absorbing potential) settings
-    absorber_enabled = bool(sim_params.get("Absorber_enabled", False))
-    absorber_strength = float(sim_params.get("Absorber_strength", 0.0))
-    absorber_start_ratio = float(sim_params.get("Absorber_start_ratio", 0.8))
-    absorber_power = float(sim_params.get("Absorber_power", 2.0))
-    absorber_tinit = float(sim_params.get("Absorber_tinit", 0.0))
-    absorber_tfinal = sim_params.get("Absorber_tfinal", None)
-
-    # Normalizations
-    w = w / omega_ho
-    x_max = x_max * 1e-6 / a_ho
-    x_min = x_min * 1e-6 / a_ho
-
-    # Grid spacing
-    dx = (x_max - x_min) / dim
-    dp = 2 * pi / (x_max - x_min)
-    d_x = np.prod(dx)
-
-    # Assemble simulation parameters dictionary
-    simulation_params = {
-        "Grid_resolution": [n1, n2, n3],
-        "x_min": x_min,
-        "x_max": x_max,
-        "Trapping_frequencies": sim_params["Trapping_frequencies"],
-        "Potential_type": sim_params["Potential_type"],
-        "SwitchOff_time": sim_params["SwitchOff_time"],
-        "w": w,
-        "dx": dx,
-        "dp": dp,
-        "dtau": dtau,
-        "Total_simulation_time": t_evol,
-        "kmax": kmax,
-        "u": u,
-        "k3": k3,
-        "Absorber_enabled": absorber_enabled,
-        "Absorber_strength": absorber_strength,
-        "Absorber_start_ratio": absorber_start_ratio,
-        "Absorber_power": absorber_power,
-        "Absorber_tinit": absorber_tinit,
-        "Absorber_tfinal": absorber_tfinal,
-        "a_ho": a_ho,
-        "omega_ho": omega_ho,
-        "d_x": d_x,
-        "shots": shots,
-        "dt": dt,
-        "vortex_excitation": vortex_excitation,
-        "vortex_charge": vortex_charge,
-        "imprinting_charge": imprinting_charge,
-        "vortex_position_x": vortex_position_x,
-        "vortex_position_y": vortex_position_y,
-        "initial_imprint_time": initial_imprint_time,
-        "imprint_position_x": imprint_position_x,
-        "imprint_position_y": imprint_position_y,
-        "imprint_every": imprint_every,
-        "imprint_times": imprint_times,
-        "max_imprints": max_imprints,
-        "repetitive": repetitive
-    }
-    
-    # Validate simulation parameters
-    ok, msg = _check_simulation_parameters(simulation_params)  
-    if not ok:
-        print(msg)
-    
-    return simulation_params, msg
+    simulations = []
+    for parameters in parameters_list:
+        positions = _format_name_component(parameters.get("soliton_positions", []))
+        axes = _format_name_component(parameters.get("soliton_axes", []))
+        imprint = parameters.get("soliton_imprint_time", 0)
+        simulation_name = f"darksoliton__pos{positions}__ax{axes}__snap{imprint}"
+        simulations.append([simulation_name, parameters])
+        _ensure_simulation_directory(simulation_name)
+    return simulations
 
 
 def save_parameters_to_json(parameters, filepath="simulation_parameters.json"):
@@ -556,103 +465,57 @@ def save_parameters_to_json(parameters, filepath="simulation_parameters.json"):
         json.dump(parameters, fp, indent=4, default=convert)
 
 
-
 # =============================================================================
 # Parameter Validation
 # =============================================================================
 
-def _check_simulation_parameters(simulation_params):
+def _perform_reimprint_checks(simulation_params):
     """
-    Perform comprehensive validation of simulation parameters.
-    
-    This function runs multiple validation checks on the simulation parameters
-    including grid, frequency, vortex, and re-imprinting checks.
-    
-    Parameters
-    ----------
-    simulation_params : dict
-        Dictionary containing all simulation parameters.
-    
-    Returns
-    -------
-    ok : bool
-        True if all checks pass, False otherwise.
-    msg : str
-        Concatenated error messages from all validation checks.
-    """
-    overall_msg = ""
-    overall = True
+    Validate re-imprinting parameters.
 
-    ok, msg = _perform_grid_checks(simulation_params)
-    overall_msg += msg + "\n"
-    overall = overall and ok
-
-    ok, msg = _perform_frequency_checks(simulation_params)
-    overall_msg += msg + "\n"
-    overall = overall and ok
-
-    ok, msg = _perform_vortex_checks(simulation_params)
-    overall_msg += msg + "\n"
-    overall = overall and ok
-
-    ok, msg = _perform_reimprint_checks(simulation_params)
-    overall_msg += msg + "\n"
-    overall = overall and ok
-
-    return overall, overall_msg
-
-
-def _perform_grid_checks(simulation_params):
-    """
-    Validate grid-related parameters.
-    
     Checks that:
-    - simulation_params is a dictionary
-    - Grid minimums are negative
-    - Grid is symmetric (|x_min| == |x_max|)
-    - Grid resolution is positive
-    
+    - Number of imprint times matches number of imprinting charges
+    - Number of initial charges matches imprinting charges
+    - Imprinting charge positions are specified correctly
+    - Maximum imprint time is within simulation bounds
+
     Parameters
     ----------
     simulation_params : dict
         Dictionary containing simulation parameters.
-    
+
     Returns
     -------
     ok : bool
         True if validation passes, False otherwise.
     msg : str
         Error message describing the issue, empty string if validation passes.
-    
-    Raises
-    ------
-    TypeError
-        If simulation_params is not a dictionary.
     """
-    # Ensure simulation_params is a dictionary
-    if not isinstance(simulation_params, dict):
-        raise TypeError("simulation_params must be a dictionary")
+    snapshots = simulation_params["shots"]
 
-    # The minimums should be negative
-    for index, x in enumerate(simulation_params["x_min"]):
-        if x > 0:
-            msg = f"x_min for axis {index + 1} is not negative. Grid is assumed symmetric."
-            return False, msg
-
-    # The grid should be symmetric
-    xmins = simulation_params["x_min"]
-    xmaxs = simulation_params["x_max"]
-    for index, x_min in enumerate(xmins):
-        if abs(x_min) != abs(xmaxs[index]):
-            msg = f"{index + 1} max and min are not symmetric. Grid is assumed symmetric."
-            return False, msg
-
-    if min(simulation_params["Grid_resolution"]) <= 0:
-        msg = "The grid resolution must be greater than zero"
+    if simulation_params["repetitive"] and (len(simulation_params["imprint_times"]) != len(simulation_params["imprinting_charge"])):
+        msg = "One list of imprinting times should be given for every simulation"
         return False, msg
 
-    return True, ""
+    if simulation_params["repetitive"]:
+        for index, charges in enumerate(simulation_params["imprinting_charge"]):
+            if isinstance(charges, list):
+                if len(charges) != len(simulation_params["imprint_position_x"][index]):
+                    msg = f"The number of imprinting charges doesn't agree with the number of x positions at index {index}"
+                    return False, msg
 
+                if len(charges) != len(simulation_params["imprint_position_y"][index]):
+                    msg = f"The number of imprinting charges doesn't agree with the number of y positions at index {index}"
+                    return False, msg
+
+        for index, times in enumerate(simulation_params["imprint_times"]):
+            # Check that the maximum imprint time is less than simulation time
+            # Imprint times are given in snapshots
+            if times and max(times) > snapshots:
+                msg = f"The maximum imprint time is greater than the total simulation time for simulation {index + 1}\n"
+                return False, msg
+
+    return True, ""
 
 def _perform_frequency_checks(simulation_params):
     """
@@ -676,142 +539,5 @@ def _perform_frequency_checks(simulation_params):
         if freq <= 0:
             msg = f"Frequency {index + 1} is negative or zero. Frequencies are assumed positives."
             return False, msg
-    
-    return True, ""
-
-
-
-def _perform_vortex_checks(simulation_params):
-    """
-    Validate vortex-related parameters.
-    
-    Checks that:
-    - Number of vortex charges matches number of positions
-    - Vortex positions are within grid bounds
-    - For repetitive mode: number of initial charges matches imprinting charges
-    
-    Parameters
-    ----------
-    simulation_params : dict
-        Dictionary containing simulation parameters.
-    
-    Returns
-    -------
-    ok : bool
-        True if validation passes, False otherwise.
-    msg : str
-        Error message describing the issue, empty string if validation passes.
-    """
-    n1, n2, n3 = simulation_params["Grid_resolution"]
-    
-    # Check the number of combinations
-    if len(simulation_params["vortex_charge"]) != len(simulation_params["vortex_position_x"]):
-        msg = "The list number of vortex charges doesn't agree with the list number of x positions"
-        return False, msg
-    
-    if len(simulation_params["vortex_position_y"]) != len(simulation_params["vortex_position_x"]):
-        msg = "The list number of x positions doesn't agree with the list number of y positions"
-        return False, msg
-    
-    if simulation_params["repetitive"] and (len(simulation_params["vortex_charge"]) != len(simulation_params["imprinting_charge"])):
-        msg = "The number of initial vortex charges doesn't agree with the number of imprinted charges"
-        return False, msg
-    
-    for index, charges in enumerate(simulation_params["vortex_charge"]):
-        if isinstance(charges, list):
-            if len(charges) != len(simulation_params["vortex_position_x"][index]):
-                msg = f"The number of charges doesn't agree with the number of x positions for simulation {index + 1}"
-                return False, msg
-            
-            if len(charges) != len(simulation_params["vortex_position_y"][index]):
-                msg = f"The number of charges doesn't agree with the number of y positions for simulation {index + 1}"
-                return False, msg
-
-            if len(simulation_params["vortex_position_x"][index]) == 0:
-                msg = f"The x positions list is empty for simulation {index + 1}"
-                return False, msg
-
-            if len(simulation_params["vortex_position_y"][index]) == 0:
-                msg = f"The y positions list is empty for simulation {index + 1}"
-                return False, msg
-            
-            if max(simulation_params["vortex_position_x"][index]) > n1 // 2:
-                msg = (f"The maximum n1 position for simulation {index + 1}, "
-                       f"{max(simulation_params['vortex_position_x'][index])} is greater than "
-                       f"half the grid size {n1 // 2}")
-                return False, msg
-            
-            if max(simulation_params["vortex_position_y"][index]) > n3 // 2:
-                msg = (f"The maximum n3 position for simulation {index + 1}, "
-                       f"{max(simulation_params['vortex_position_y'][index])} is greater than "
-                       f"half the grid size {n3 // 2}")
-                return False, msg
-            
-            if min(simulation_params["vortex_position_x"][index]) < -n1 // 2:
-                msg = (f"The minimum n1 position for simulation {index + 1}, "
-                       f"{min(simulation_params['vortex_position_x'][index])} is less than "
-                       f"half the grid size {-n1 // 2}")
-                return False, msg
-            
-            if min(simulation_params["vortex_position_y"][index]) < -n3 // 2:
-                msg = (f"The minimum n3 position for simulation {index + 1}, "
-                       f"{min(simulation_params['vortex_position_y'][index])} is less than "
-                       f"half the grid size {-n3 // 2}")
-                return False, msg
-    
-    return True, ""
-
-
-def _perform_reimprint_checks(simulation_params):
-    """
-    Validate re-imprinting parameters.
-    
-    Checks that:
-    - Number of imprint times matches number of imprinting charges
-    - Number of initial charges matches imprinting charges
-    - Imprinting charge positions are specified correctly
-    - Maximum imprint time is within simulation bounds
-    
-    Parameters
-    ----------
-    simulation_params : dict
-        Dictionary containing simulation parameters.
-    
-    Returns
-    -------
-    ok : bool
-        True if validation passes, False otherwise.
-    msg : str
-        Error message describing the issue, empty string if validation passes.
-    """
-    sim_time = simulation_params["Total_simulation_time"]  # time in sec
-    snapshots = simulation_params["shots"]
-    
-    if simulation_params["repetitive"] and (len(simulation_params["imprint_times"]) != len(simulation_params["imprinting_charge"])):
-        msg = "One list of imprinting times should be given for every simulation"
-        return False, msg
-    
-    if simulation_params["repetitive"]:
-        if len(simulation_params["vortex_charge"]) != len(simulation_params["imprinting_charge"]):
-            msg = (f"The list number of initial charges {len(simulation_params['vortex_charge'])}, "
-                   f"doesn't agree with the list number of imprinted {len(simulation_params['imprinting_charge'])}")
-            return False, msg
-        
-        for index, charges in enumerate(simulation_params["imprinting_charge"]):
-            if isinstance(charges, list):
-                if len(charges) != len(simulation_params["imprint_position_x"][index]):
-                    msg = f"The number of imprinting charges doesn't agree with the number of x positions at index {index}"
-                    return False, msg
-                
-                if len(charges) != len(simulation_params["imprint_position_y"][index]):
-                    msg = f"The number of imprinting charges doesn't agree with the number of y positions at index {index}"
-                    return False, msg
-        
-        for index, times in enumerate(simulation_params["imprint_times"]):
-            # Check that the maximum imprint time is less than simulation time
-            # Imprint times are given in snapshots
-            if times and max(times) > snapshots:
-                msg = f"The maximum imprint time is greater than the total simulation time for simulation {index + 1}\n"
-                return False, msg
     
     return True, ""

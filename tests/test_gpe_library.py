@@ -6,6 +6,7 @@ sys.path.append('.')
 from src.library.gpe_library import GPELibrary as gpe
 from src.library.gpe_library import GPE2DLibrary as gpe2d
 from src.library.gpe_library import GPE3DLibrary as gpe3d
+from src.library.common_utils import CommonUtils as cu
 
 
 class TestModGradPsi(unittest.TestCase):
@@ -33,12 +34,14 @@ class TestModGradPsi(unittest.TestCase):
                         self.x_max, dx=self.dx, dp=self.dp, w=0, \
                         n1=self.N1, n2=self.N2, n3=self.N3, \
                             device='cpu')
+        # init_grid now returns the 1-D momentum axes directly (p1, p2, p3),
+        # not the legacy 2-D (1, n) form, so no extra [0] indexing is needed.
         if dim==1:
-            return [x1], [p1[0]], self.N1
+            return [x1], [p1], self.N1
         elif dim==2:
-            return (x1, x2) , (p1[0], p2[0]), (self.N1, self.N2)
+            return (x1, x2) , (p1, p2), (self.N1, self.N2)
         elif dim==3:
-            return (x1, x2, x3), (p1[0], p2[0], p3[0]), (self.N1, self.N2, self.N3)
+            return (x1, x2, x3), (p1, p2, p3), (self.N1, self.N2, self.N3)
 
     def test_tensor_flat_1D(self):
         space_grid, p_axes, n = self.setup_grids(dim=1)
@@ -141,9 +144,9 @@ class TestInitGrid(unittest.TestCase):
         assert len(x1) == self.N1
         assert len(x2) == self.N1
         assert len(x3) == self.N3
-        assert len(p1[0]) == self.N1, f"expected {self.N1} and got {len(p1)}"
-        assert len(p2[0]) == self.N1
-        assert len(p3[0]) == self.N3
+        assert len(p1) == self.N1, f"expected {self.N1} and got {len(p1)}"
+        assert len(p2) == self.N1
+        assert len(p3) == self.N3
         assert len(p_grid) == 3
         assert p_grid[0].shape == (self.N1, self.N1, self.N3), f"expected {(self.N1, self.N1, self.N3)} and got {p_grid[0].shape}"
         assert p_grid[1].shape == (self.N1, self.N1, self.N3), f"expected {(self.N1, self.N1, self.N3)} and got {p_grid[1].shape}"
@@ -200,11 +203,44 @@ class TestXEvolution(unittest.TestCase):
         # Expected output
         expected_output = torch.exp(-factor * dtau * 1j * utot1) * psi1
 
-        # Run the function
-        result = gpe.x_evolution(psi1, utot1, dtau, factor)
+        # Run the function (x_evolution now lives in CommonUtils)
+        result = cu.x_evolution(psi1, utot1, dtau, factor)
 
         # Assert the result is close to the expected output
         self.assertTrue(torch.allclose(result, expected_output, atol=1e-6))
+
+
+class TestPEvolution(unittest.TestCase):
+    def test_p_evolution(self):
+        psi1 = torch.tensor(
+            [[1.0 + 0.5j, 2.0 - 1.0j], [0.0 + 1.0j, -1.0 + 0.0j]],
+            dtype=torch.cdouble,
+        )
+        p_sq = torch.tensor([[0.0, 1.0], [4.0, 9.0]], dtype=torch.float64)
+        dtau = 0.2
+
+        psiF = torch.fft.fftn(psi1, norm='forward')
+        expected_output = torch.fft.ifftn(
+            torch.exp(-1j * dtau * 0.5 * p_sq) * psiF,
+            norm='forward',
+        )
+
+        result = gpe.p_evolution(psi1, dtau, p_sq)
+        self.assertTrue(torch.allclose(result, expected_output, atol=1e-12, rtol=0.0))
+
+
+class TestNormalize(unittest.TestCase):
+    def test_normalize_unit_norm(self):
+        phi = torch.tensor(
+            [[1.0 + 1.0j, 2.0 + 0.0j], [0.5 - 0.5j, -1.0 + 2.0j]],
+            dtype=torch.cdouble,
+        )
+        d_x = 0.25
+
+        normalized = gpe.normalize(phi, d_x)
+        norm_value = d_x * torch.sum(torch.abs(normalized) ** 2)
+
+        self.assertAlmostEqual(norm_value.item(), 1.0, places=12)
 
 class TestCalculateDensityPeak(unittest.TestCase):
     def test_density_peak_simple(self):
@@ -502,7 +538,8 @@ class TestGPE3DLibrary(unittest.TestCase):
 
     def test_calculate_velocity3d_plane_wave_x(self):
         gx, _, _ = self.space_grid
-        kx = self.p1[0][1].item()
+        # p1 is the 1-D momentum axis; element [1] is the first non-zero mode.
+        kx = self.p1[1].item()
         psi = torch.exp(1j * kx * gx).to(torch.cdouble)
 
         v1, v2, v3 = gpe3d.calculate_velocity3D(psi, self.p_grid)
@@ -532,7 +569,10 @@ class TestDarkSoliton(unittest.TestCase):
     """Tests for dark soliton creation and imprinting."""
 
     def setUp(self):
-        self.n1, self.n2, self.n3 = 64, 8, 64
+        # 51 points over [-5, 5] gives spacing 0.2, so grid points land exactly
+        # on the soliton centres used here (0 and +-2). With an even count the
+        # centre falls between grid points and the core density never reaches 0.
+        self.n1, self.n2, self.n3 = 51, 8, 51
         self.x1 = torch.linspace(-5.0, 5.0, self.n1, dtype=torch.float64)
         self.x3 = torch.linspace(-5.0, 5.0, self.n3, dtype=torch.float64)
         # uniform unit-amplitude wavefunction

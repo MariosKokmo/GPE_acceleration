@@ -1,0 +1,6 @@
+# GUI-only dependency. Kept separate from the solver's requirements so the
+# simulation environment is never forced to install Qt.
+#
+# Target: Python 3.12. PySide6 6.7.x/6.8.x provide cp312 wheels.
+# (On the old Python 3.8 env this had to be pinned to 6.4.3; 3.12 lifts that.)
+PySide6>=6.7,<6.9

@@ -20,11 +20,17 @@ Current supported excitations are **vortices** and **dark solitons**. Repetitive
 
 The vortices are assumed to be printed on the n1-n3 (i.e. x-z plane). For the simulations to have physical meaning, it is assumed that the BEC is adequately flat on the n2 (y axis) so that the vortices are assumed to not bend and traverse the whole BEC along the y axis.
 
+Beyond zero-temperature GPE dynamics, the package includes two **finite-temperature models** under `src/experimental/`:
+
+- **SGPE** (`src/models/finite_temp_BEC.py`) — Stochastic Projected GPE: adds damping and thermal noise to the condensate wavefunction equation, suitable for near-equilibrium finite-temperature dynamics.
+- **ZNG** (`src/experimental/zng/`) — Zaremba-Nikuni-Griffin framework: couples the condensate (modified GPE) to an explicit thermal cloud represented by Monte Carlo test particles, giving access to the full two-component dynamics.
+
 ## Table of Contents
 - [Key Features](#key-features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
+- [Finite-Temperature Models](#finite-temperature-models)
 - [Project Structure](#project-structure)
 - [How It Works](#how-it-works)
 - [CI/CD](#cicd)
@@ -35,13 +41,15 @@ The vortices are assumed to be printed on the n1-n3 (i.e. x-z plane). For the si
 ## Key Features
 
 *   **🚀 GPU Acceleration**: Utilizes PyTorch and CUDA for massively parallelized computations on the GPU.
-*   **🌀 Vortex Imprinting**: specialized tools for imprinting phase Singularities (vortices) with configurable charge, position, and timing.
+*   **🌀 Vortex Imprinting**: Specialized tools for imprinting phase singularities (vortices) with configurable charge, position, and timing.
 *   **🌊 Dark Solitons**: Supports black and grey soliton imprinting with configurable position, width, axis, and imprint time.
 *   **⚡ Automated Ground State**: Automatically calculates the ground state using Imaginary Time Evolution if it doesn't exist.
 *   **🔄 Repetitive & Array Configurations**: Support for dynamic simulation scenarios defined via simple JSON arrays.
 *   **🧭 Rotating Potentials**: Includes a rotating harmonic potential with configurable rotation axis and angular frequency.
 *   **🧱 Dissipative Extensions**: Optional three-body loss and boundary absorber (CAP) support.
 *   **📐 3D Utilities**: Includes helpers for vortex rings/lines, 3D velocity, angular momentum, and density slices.
+*   **🌡️ Finite-Temperature (SGPE)**: Stochastic Projected GPE with damping and thermal noise for near-equilibrium finite-T dynamics.
+*   **🔬 Finite-Temperature (ZNG)**: Full two-component Zaremba-Nikuni-Griffin framework with Monte Carlo thermal cloud and stochastic C₁₂ collisions.
 *   **📹 Visualization**: Integrated utilities for generating videos from simulation snapshots.
 *   **📊 Flexible Configuration**: Complete control over grid resolution, trapping potentials, and simulation physics via JSON.
 
@@ -91,6 +99,28 @@ The easiest way to run a simulation is using the provided `run.py` script.
     ```bash
     python src/run.py
     ```
+
+### Using the Simulator API (object-oriented)
+
+`Simulator` is the recommended way to drive simulations programmatically — from a notebook, a parameter sweep, or any Python script — without touching the CLI.
+
+```python
+from src.simulator import Simulator
+
+sim = Simulator("configuration_file.json")
+
+# Inspect before running
+print(sim.system.simulation_parameters)
+print(sim.system.uext)
+
+# Run all simulation combinations defined in the config
+sim.run()
+
+# Inspect results after running
+print(sim.simulations.BEC)
+```
+
+`run.py` is a thin wrapper around `Simulator`, so the CLI and the API always execute the same code path.
 
 ### Using the Command Line Interface (CLI)
 
@@ -203,45 +233,192 @@ To check the configuration file locally, you can run
 python -m src.cli.baqs config_test.json appConfig.json -c -v 2
 ```
 
+## Finite-Temperature Models
+
+Both finite-temperature models inherit from `BaseBEC`, so all existing I/O,
+ground-state finding, snapshotting, and energy measurements work unchanged.
+All quantities use **dimensionless units**: ħ = m = ω_ho = 1, so temperatures
+are expressed as k_B T / (ħ ω_ho).
+
+---
+
+### SGPE — Stochastic Projected GPE
+
+**File:** `src/models/finite_temp_BEC.py` · **Class:** `FiniteTempBEC`
+
+The SGPE modifies the GPE to include coupling to a thermal reservoir through two extra terms:
+
+```
+∂ψ/∂t = −(i + γ)(H_mf − μ)ψ + η(r, t)
+```
+
+| Symbol | Meaning |
+|--------|---------|
+| γ | Dimensionless damping coefficient (energy exchange rate with reservoir) |
+| μ | Reservoir chemical potential — computed from the ground state if not supplied |
+| η(r,t) | Complex Gaussian noise satisfying ⟨η\*(r,t) η(r′,t′)⟩ = 2γ kT δ(r−r′) δ(t−t′) |
+
+**Physics:** modes with H_mf > μ are damped (energy removed); modes with H_mf < μ are amplified (energy drawn from reservoir). Together with η, this drives the system to a thermal equilibrium state at temperature T.
+
+Setting `temperature = 0` recovers a purely dissipative (damped) GPE, useful as an alternative ground-state finder.
+
+**New config keys:**
+
+```json
+"temperature": 1.5,
+"damping_coefficient": 0.03,
+"chemical_potential": null
+```
+
+**Usage:**
+
+```python
+from src.experimental.zng.zng_BEC import ZNGBEC
+# or for SGPE:
+from src.models.finite_temp_BEC import FiniteTempBEC
+
+# Swap into simulation.py line 59, or instantiate directly:
+bec = FiniteTempBEC(parameters, system, app, simulation_name)
+bec.evolve()
+```
+
+**New library functions** (added to `GPELibrary` in `src/library/gpe_library.py`):
+
+| Function | Purpose |
+|----------|---------|
+| `sgpe_step` | Split-step with `exp(−(i+γ)·dt·(H_mf−μ))` — damps/amplifies modes relative to μ |
+| `generate_thermal_noise` | Complex Gaussian field with amplitude √(γ kT Δτ / δV) |
+| `calculate_chemical_potential` | μ = e_kin + e_pot + 2·e_int from the current wavefunction |
+
+---
+
+### ZNG — Zaremba-Nikuni-Griffin Framework
+
+**Directory:** `src/experimental/zng/` · **Class:** `ZNGBEC`
+
+ZNG is a two-component model that explicitly tracks both the condensate and the thermal cloud:
+
+**Condensate (modified GPE):**
+```
+i ∂ψ/∂t = [H_GP + i R(r,t)/2] ψ
+H_GP = −∇²/2 + V_ext + u(n_c + 2ñ)
+R(r) = 2 γ_12 [μ − V_eff(r)]
+```
+
+**Thermal cloud (N_test classical test particles):**
+```
+dr_i/dt = p_i
+dp_i/dt = −∇U(r_i),    U = V_ext + 2u(n_c + ñ)
+```
+
+The condensate and thermal cloud are coupled at every time step through their shared densities n_c = |ψ|² and ñ(r) (deposited from particles onto the grid via CIC interpolation).
+
+**Per-step loop:**
+
+1. Build condensate GPE potential V_GP = V_ext + u(n_c + 2ñ)
+2. Compute source term R from C₁₂ mean-field approximation
+3. Evolve ψ one split-step with complex potential V_GP + iR/2
+4. Advance test particles one leapfrog step under U
+5. Apply C₁₂ stochastic collisions (absorption + emission)
+6. Apply C₂₂ thermal–thermal scattering (stub — see below)
+7. Deposit updated particle positions → new ñ
+
+**New config keys:**
+
+```json
+"temperature": 1.5,
+"n_test_particles": 10000,
+"gamma_12": 0.1,
+"chemical_potential": null,
+"enable_c22": false
+```
+
+**File layout:**
+
+| File | Contents |
+|------|---------|
+| `zng_library.py` | Stateless physics functions: CIC deposition, spectral gradient, mean-field potentials, R term, initial-cloud sampling |
+| `monte_carlo.py` | Particle dynamics: leapfrog integrator, C₁₂ stochastic collisions, C₂₂ stub |
+| `zng_BEC.py` | `ZNGBEC(BaseBEC)` — wires the above into the simulation loop |
+
+**C₂₂ note:** Thermal–thermal scattering is implemented as a documented stub in `monte_carlo.apply_c22_collisions`. The function signature, docstring, and DSMC/BGK implementation options are in place; the body returns inputs unchanged until a full collision algorithm is added.
+
+---
+
+### Choosing a model
+
+| Scenario | Recommended model |
+|----------|------------------|
+| Zero temperature, topological excitations | `BEC` (default) |
+| Near-equilibrium finite T, single wavefunction | `FiniteTempBEC` (SGPE) |
+| Explicit thermal cloud dynamics, two-component | `ZNGBEC` (ZNG) |
+| Alternative ground-state search | `FiniteTempBEC` with T=0, γ>0 |
+
 ## Project Structure
 
 ```
 GPE_acceleration/
 ├── src/
-│   ├── application.py       # App configuration & logging
-│   ├── run.py               # Legacy entry point script
-│   ├── simulator.py         # Simulator orchestration
-│   ├── cli/                 # Command Line Interface
-│   │   ├── baqs.py          # CLI entry point
-│   │   └── functions.py     # CLI helper functions
-│   ├── library/             # Core Physics Library
-│   │   ├── gpe_library.py   # Split-Step Fourier implementation
-│   │   ├── ground_state.py  # Imaginary time evolution
-│   │   ├── parameters.py    # Simulation parameter handling
-│   │   └── potentials.py    # Potential definitions (incl. rotating and absorber support)
-│   ├── models/              # Simulation Data Structures
-│   │   ├── BEC.py           # Bose-Einstein Condensate object
-│   │   ├── base_BEC.py      # Abstract base class for BECs
-│   │   ├── system.py        # System wrapper (Grid + Potential)
-│   │   └── simulation.py    # Simulation logic wrapper
+│   ├── application.py         # App configuration & logging
+│   ├── run.py                 # CLI entry point (delegates to Simulator)
+│   ├── simulator.py           # Simulator class — OO API for programmatic use
+│   ├── cli/                   # Command Line Interface
+│   │   ├── baqs.py            # CLI entry point
+│   │   └── functions.py       # CLI helper functions
+│   ├── library/               # Core Physics Library
+│   │   ├── gpe_library.py     # Split-Step Fourier, energy, SGPE functions
+│   │   ├── ground_state.py    # Imaginary time evolution
+│   │   ├── parameters.py      # Physical constants
+│   │   └── potentials.py      # Potential definitions (harmonic, rotating, absorber)
+│   ├── models/                # Simulation models
+│   │   ├── base_BEC.py        # Abstract base class — ground state, I/O, loop template
+│   │   ├── BEC.py             # Zero-temperature GPE with vortex/soliton imprinting
+│   │   ├── finite_temp_BEC.py # SGPE finite-temperature model
+│   │   ├── system.py          # System wrapper (grid + potential)
+│   │   └── simulation.py      # Runs a list of simulation combinations
+│   ├── experimental/          # Research-stage models (not in main pipeline)
+│   │   └── zng/               # Zaremba-Nikuni-Griffin two-component framework
+│   │       ├── zng_library.py # Stateless physics: CIC deposition, potentials, R term
+│   │       ├── monte_carlo.py # Leapfrog integrator, C₁₂ collisions, C₂₂ stub
+│   │       └── zng_BEC.py     # ZNGBEC model class
 │   └── utils/
-│       ├── read_write_utils.py # I/O operations
-│       ├── setup_simulations.py # Simulation configuration setup
-│       └── video_creation.py   # Visualization tools
-├── tests/                   # Unit tests
-├── .pipelines/              # CI/CD YAML pipelines
-├── .environments/           # Environment-specific pipeline variables
-├── configuration_file.json  # Physics config
-├── appConfig.json           # App settings
-└── requirements.txt         # Python dependencies
+│       ├── read_write_utils.py  # I/O operations
+│       ├── setup_simulations.py # Config loading and validation
+│       └── video_creation.py    # Visualization tools
+├── tests/                     # Unit tests
+├── .pipelines/                # CI/CD YAML pipelines
+├── .environments/             # Environment-specific pipeline variables
+├── configuration_file.json    # Physics config
+├── appConfig.json             # App settings
+└── requirements.txt           # Python dependencies
 ```
 
 ## How It Works
 
-1.  **Ground State**: The solver first checks if a ground state exists for the given grid and potential. If not, it computes it using **Imaginary Time Propagation (ITP)**.
-2.  **Time Evolution**: The real-time dynamics are solved using the **Split-Step Fourier Method**.
-3.  **Vortex Imprinting**: Phase imprinting is applied to the wavefunction at specified time steps to create vortices.
-4.  **Hardware**: All dense matrix operations (FFTs, element-wise multiplications) are offloaded to the GPU via PyTorch tensors.
+### Zero-temperature GPE (`BEC`)
+
+1.  **Ground State**: Checks for a cached ground-state file; computes it via **Imaginary Time Propagation (ITP)** if absent.
+2.  **Time Evolution**: Real-time dynamics solved with the **Split-Step Fourier Method** — alternating half-steps in real space (potential) and full steps in momentum space (kinetic).
+3.  **Vortex / Soliton Imprinting**: Phase or amplitude masks are applied to ψ at specified snapshot indices.
+4.  **Hardware**: All FFTs and element-wise operations run on GPU via PyTorch tensors.
+
+### Finite temperature — SGPE (`FiniteTempBEC`)
+
+The SGPE replaces the standard split-step propagator with a damped one and adds stochastic noise at each step:
+
+- **Damped propagator**: `exp(−(i+γ)·dt·(H_mf−μ))` — the (i+γ) factor damps modes above μ and amplifies modes below μ, thermalising the condensate.
+- **Thermal noise**: a complex Gaussian field η added after each step, with variance 2γ kT Δτ/δV (fluctuation-dissipation theorem).
+- **Chemical potential** μ is computed once from the ground-state wavefunction at t=0 and held fixed, representing the thermal reservoir.
+
+### Finite temperature — ZNG (`ZNGBEC`)
+
+ZNG tracks two coupled components at every time step:
+
+- **Condensate**: evolved under a modified GPE `i∂ψ/∂t = [H_GP + iR/2]ψ` where R is the C₁₂ source term and H_GP includes the thermal back-reaction `2uñ`.
+- **Thermal cloud**: N_test classical test particles advanced by a leapfrog integrator under the Hartree-Fock mean-field potential `U = V_ext + 2u(n_c + ñ)`.
+- **C₁₂ coupling**: stochastic absorption (low-energy thermal particles join the condensate) and emission (condensate atoms scatter into the thermal cloud at the Thomas-Fermi edge).
+- **C₂₂**: thermal–thermal scattering stub — returns particles unchanged until a DSMC or BGK implementation is added.
+- **Grid ↔ particles**: Cloud-In-Cell (CIC) trilinear interpolation deposits particles onto the grid for ñ and interpolates grid forces back to particles each step.
 
 ## CI/CD
 

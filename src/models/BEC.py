@@ -5,6 +5,7 @@ Once a BEC object is initialised, its evolution can be run.
 from typing import Optional, List, Tuple, Dict, Any, Union
 from src.library.gpe_library import GPELibrary as gpe
 from src.library.gpe_library import GPE2DLibrary as gpe2d
+from src.library.common_utils import CommonUtils as cu
 import src.library.ground_state as gs
 import src.utils.read_write_utils as rw
 from src.utils import video_creation
@@ -21,9 +22,9 @@ class BEC:
         self.device = app.device
         self.logger = app.logger
         self.time = app.time
-        self.parameters = parameters
+        self.parameters = parameters # simulation configuration parameters e.g. vortices
         self.simulation_name = simulation_name
-        self.system = system
+        self.system = system # system parameters are in here e.g. grid, potential etc.
         self.gs_path: Optional[str] = None
         self.repetitive_phase: Optional[torch.Tensor] = None
         self.all_phases: Dict[Tuple, torch.Tensor] = {}
@@ -53,7 +54,7 @@ class BEC:
             if not os.path.exists(gs_file):
                 self.logger.info("Calculating ground state...")
                 try:
-                    _ = gs.find_ground_state(self.parameters, self.system, gs_file, device=self.device)
+                    _ = gs.GroundState.find_ground_state(self.parameters, self.system, gs_file, device=self.device)
                 except Exception as e:
                     self.logger.error(f"Failed to calculate ground state: {e}")
                     raise
@@ -82,7 +83,7 @@ class BEC:
             self.psi = torch.zeros((n1,n2,n3), dtype=torch.cdouble, device=self.device)
             if self.gs_path is None:
                 raise ValueError("Ground state path is None after _find_ground_state")
-            self.psi = gs.read_ground_state(self.gs_path, n1, n2, n3)
+            self.psi = gs.GroundState.read_ground_state(self.gs_path, n1, n2, n3)
             self.psi = self.psi.to(self.device)
         except Exception as e:
             self.logger.error(f"Failed to initialise BEC: {e}")
@@ -110,7 +111,7 @@ class BEC:
         """
         if self.psi is None:
             raise RuntimeError("BEC wavefunction (psi) is not initialized.")
-        return gpe.extract_phase(self.psi)
+        return cu.extract_phase(self.psi)
 
     def _create_vortices(self, vortices: np.ndarray) -> torch.Tensor:
         """
@@ -132,7 +133,7 @@ class BEC:
         n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
         
         try:
-            new_phase = gpe.create_vortices(vortices, x1, x2, x3, n1, n2, n3, self.device)
+            new_phase = gpe2d.create_vortices(vortices, x1, x2, x3, n1, n2, n3, self.device)
             return new_phase
         except Exception as e:
             self.logger.error(f"Error creating vortices: {e}")
@@ -147,7 +148,7 @@ class BEC:
             vortex_phase = self._create_vortices(vortices)
             if self.psi is None:
                 raise RuntimeError("BEC wavefunction (psi) is not initialized.")
-            self.psi = gpe.update_phase(self.psi, vortex_phase)
+            self.psi = cu.update_phase(self.psi, vortex_phase)
         except Exception as e:
             self.logger.error(f"Error imprinting vortices: {e}")
             raise
@@ -244,7 +245,7 @@ class BEC:
         if self.psi is None:
             raise RuntimeError("BEC wavefunction (psi) is not initialized.")
         try:
-            self.psi = gpe.update_phase(self.psi, phase)
+            self.psi = cu.update_phase(self.psi, phase)
         except Exception as e:
             self.logger.error(f"Error during repetitive imprint: {e}")
             raise
@@ -284,6 +285,7 @@ class BEC:
             params = self.system.simulation_parameters
             self.kmax = params["kmax"]
             self.dt = params["dt"]
+            self.dx = params["dx"]
             self.omega_ho = params["omega_ho"]
             self.shots = params["shots"]
             self.dtau = params["dtau"]
@@ -303,7 +305,15 @@ class BEC:
             self.cross_line = torch.zeros(self.shots, self.n1)
             self.energies = []
 
-            if self.parameters.get("vortex_excitation", False):
+            # Defaults so the evolution loop is safe when vortices are disabled
+            # (e.g. dark-soliton-only runs). Overwritten by the vortex
+            # initialisation below when vortex excitation is enabled.
+            self.vortex_excitation = bool(self.parameters.get("vortex_excitation", False))
+            self.repetitive = False
+            self.imprint_times = []
+            self.initial_imprint_time = None
+
+            if self.vortex_excitation:
                 self._initialize_vortex_parameters()
 
             if self.parameters.get("dark_soliton", False):
@@ -432,7 +442,8 @@ class BEC:
                     self._write_iteration_data(count, t)
                     count += 1
 
-                if iteration == (self.kmax // self.shots) * self.initial_imprint_time and not initial_imprint_occured:
+                if self.vortex_excitation and not initial_imprint_occured and \
+                        iteration == (self.kmax // self.shots) * self.initial_imprint_time:
                     self._perform_initial_imprint()
                     initial_imprint_occured = True
 
@@ -485,16 +496,16 @@ class BEC:
             return
 
         try:
-            rw.write_data(self.psi, count, self.x1, self.x3, self.n1, self.n3, self.a_ho)
+            rw.write_data(self.psi, count, self.x1, self.x3, self.n1, self.n3, self.a_ho, self.dx)
             
             if hasattr(self.app, 'phase_imaging') and self.app.phase_imaging:
                 cur_phase = self._extract_phase()
                 rw.save_figure_phase(cur_phase, count)
                 
-            rms = gpe.rms_radius(self.psi, self.system.center, self.system.space_grid)
+            rms = gpe2d.rms_radius(self.psi, self.system.center, self.system.space_grid)
             self.rms_measurements[count] = rms
             self.cross_line[count, :] = gpe2d.calculate_cross_section_line(self.psi)
-            self.energies.append(gpe.calculate_energy_allocation(self.psi, self.uext, self.p_grid, {"u": self.u}))
+            self.energies.append(gpe.calculate_energy_allocation(self.psi, self.uext, (self.p1, self.p2, self.p3), u=self.u))
             
             self.logger.info(f"t = {t / self.omega_ho}")
         except Exception as e:

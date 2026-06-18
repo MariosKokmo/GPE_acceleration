@@ -1,24 +1,129 @@
 {
-    "Grid_positive_limits":[60, 1.5, 60],
-    "Grid_negative_limits":[-60, -1.5, -60],
-    "Grid_resolution":[8, 4, 8],
-    "Trapping_frequencies":[20, 300, 20],
-    "Potential_type":"harmonic",
-    "SwitchOff_time":9999,
-    "three-body-losses": 0,
-    "Total_simulation_time":15e-3,
-    "dt":5e-7,
-    "snapshots":15,
-    "vortex_excitation":1,
-    "repetitive":1,
-    "vortex_charge":[[1], [2]],
-    "imprinting_charge":[[[1,1,1]], [[1,2]]],
-    "vortex_position_x":[[-2], [0]],
-    "vortex_position_y":[[0], [0]],
-    "initial_imprint_time":[2, 5],
-    "imprint_position_x":[[[-2,0,2]], [[0,0]]],
-    "imprint_position_y":[[[0,0,0]], [[0,0]]],
-    "imprint_every":[[],[]],
-    "imprint_times":[[10], [7,9]],
-    "max_imprints":[1, 2]
+    "coordinates": "cartesian",
+    "Grid_positive_limits": [
+        60.0,
+        1.5,
+        60.0
+    ],
+    "Grid_negative_limits": [
+        -60.0,
+        -1.5,
+        -60.0
+    ],
+    "Grid_resolution": [
+        256,
+        16,
+        256
+    ],
+    "Trapping_frequencies": [
+        20.0,
+        300.0,
+        20.0
+    ],
+    "Potential_type": "harmonic",
+    "Total_simulation_time": 0.015,
+    "dt": 5e-07,
+    "snapshots": 15,
+    "SwitchOff_time": 9999.0,
+    "three-body-losses": 0.0,
+    "model_type": "BEC",
+    "temperature": 0.0,
+    "damping_coefficient": 0.03,
+    "chemical_potential": null,
+    "n_test_particles": 10000,
+    "gamma_12": 0.1,
+    "enable_c22": false,
+    "Absorber_enabled": false,
+    "vortex_excitation": 1,
+    "repetitive": 1,
+    "vortex_charge": [
+        [
+            1
+        ],
+        [
+            2
+        ]
+    ],
+    "imprinting_charge": [
+        [
+            [
+                1,
+                1,
+                1
+            ]
+        ],
+        [
+            [
+                1,
+                2
+            ]
+        ]
+    ],
+    "vortex_position_x": [
+        [
+            -2
+        ],
+        [
+            0
+        ]
+    ],
+    "vortex_position_y": [
+        [
+            0
+        ],
+        [
+            0
+        ]
+    ],
+    "initial_imprint_time": [
+        2,
+        5
+    ],
+    "imprint_position_x": [
+        [
+            [
+                -2,
+                0,
+                2
+            ]
+        ],
+        [
+            [
+                0,
+                0
+            ]
+        ]
+    ],
+    "imprint_position_y": [
+        [
+            [
+                0,
+                0,
+                0
+            ]
+        ],
+        [
+            [
+                0,
+                0
+            ]
+        ]
+    ],
+    "imprint_every": [
+        [],
+        []
+    ],
+    "imprint_times": [
+        [
+            10
+        ],
+        [
+            7,
+            9
+        ]
+    ],
+    "max_imprints": [
+        1,
+        2
+    ]
 }
