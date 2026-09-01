@@ -1,0 +1,98 @@
+trigger:
+  branches:
+    include:
+    - main
+  tags:
+    include:
+    - v*
+
+pr: none
+
+stages:
+- stage: Build
+  displayName: Build Release Artifact
+  variables:
+  - template: ../.environments/prod.yaml
+  jobs:
+  - job: Build
+    displayName: Build package
+    pool:
+      vmImage: $(vmImage)
+    steps:
+    - task: UsePythonVersion@0
+      displayName: Use Python $(pythonVersion)
+      inputs:
+        versionSpec: $(pythonVersion)
+
+    - script: |
+        python -m pip install --upgrade pip
+        pip install build
+        python -m build
+      displayName: Build sdist and wheel
+
+    - publish: $(packageOutputDir)
+      displayName: Publish artifact
+      artifact: $(artifactName)
+
+- stage: DeployDev
+  displayName: Deploy to Dev
+  dependsOn: Build
+  variables:
+  - template: ../.environments/dev.yaml
+  condition: succeeded()
+  jobs:
+  - deployment: DeployDev
+    environment: dev
+    pool:
+      vmImage: $(vmImage)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: $(artifactName)
+          - script: |
+              $(deployCommand)
+            displayName: Deploy dev
+
+- stage: DeployStaging
+  displayName: Deploy to Staging
+  dependsOn: DeployDev
+  variables:
+  - template: ../.environments/staging.yaml
+  condition: succeeded()
+  jobs:
+  - deployment: DeployStaging
+    environment: staging
+    pool:
+      vmImage: $(vmImage)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: $(artifactName)
+          - script: |
+              $(deployCommand)
+            displayName: Deploy staging
+
+- stage: DeployProd
+  displayName: Deploy to Production
+  dependsOn: DeployStaging
+  variables:
+  - template: ../.environments/prod.yaml
+  condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/tags/v'))
+  jobs:
+  - deployment: DeployProd
+    environment: production
+    pool:
+      vmImage: $(vmImage)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: $(artifactName)
+          - script: |
+              $(deployCommand)
+            displayName: Deploy production

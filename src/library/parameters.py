@@ -13,3 +13,4 @@ class CONSTANTS():
   g=9.81
   ascat = 99*a_bohr	# scattering length
   nat = 5e+4		# number of atoms
+  k3 = 1000 # non-dimension strength of 3-body losses

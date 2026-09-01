@@ -1,0 +1,12 @@
+# Documentation toolchain only — deliberately does not include the solver's
+# runtime dependencies. Every heavy package (torch, opencv, matplotlib, pandas,
+# the Qt bindings) is mocked by autodoc instead of installed, which keeps the
+# Read the Docs build to seconds rather than pulling hundreds of megabytes of
+# wheels. See docs/conf.py, `autodoc_mock_imports`.
+sphinx==8.1.3
+myst-parser==4.0.0
+furo==2024.8.6
+
+# numpy is small and stays real, so annotations and default arguments that
+# mention it render properly rather than as mock objects.
+numpy==1.26.4

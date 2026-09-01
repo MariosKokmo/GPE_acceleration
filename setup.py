@@ -21,18 +21,24 @@ def find_version(*file_paths):
 setup(
     author="Marios Kokmotos",
     description="",
-    name="",
+    name="baqs",
     version=find_version('src','__version__.py'),
-    package_dir={"": "src"},
-    packages=find_packages(where='src', 
-                           include=["src*"],
-                           ),
+    # Install ``src`` as a top-level importable package so that the
+    # ``from src....`` imports used throughout the codebase resolve when the
+    # distribution is pip-installed (with no source tree present).
+    packages=find_packages(include=["src", "src.*"]),
+    entry_points={
+        "console_scripts": [
+            "baqs=src.cli.baqs:main",
+        ],
+    },
     include_package_data=True,
     install_requires=[
-        'matplotlib>=3.7.1,<4',
-        'numpy==1.23.5', 
-        'pandas==1.5.3',
-        'torch==2.1.0+cu118'
+        'matplotlib>=3.8,<4',
+        'numpy>=1.26,<2.0',
+        'pandas>=2.1,<2.3',
+        'opencv-python>=4.9',
+        'torch>=2.2,<2.5'
         ],
-    python_requires='>=3.7',
+    python_requires='>=3.9,<3.13',
 )

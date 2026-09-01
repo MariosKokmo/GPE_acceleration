@@ -1,2 +1,21 @@
-experimental/
+
 .vscode/
+venv/
+__pycache__/
+.venv
+.claude
+
+# Python packaging / build artifacts
+build/
+dist/
+*.egg-info/
+*.spec
+
+# Runtime logs
+log.txt
+*_log.txt
+
+# Sphinx build products (docs/api is regenerated from the source each build)
+docs/_build/
+docs/api/
+docs/_extra/
