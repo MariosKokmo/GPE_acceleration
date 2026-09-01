@@ -1,9 +1,58 @@
-"""Provides the laboratory system of external potential"""
+r"""
+Laboratory system: grid and external potential.
+
+The :class:`System` object is built once per run, before any BEC exists. It
+parses the configuration file, decides whether the simulation is Cartesian
+:math:`(x, y, z)` or cylindrical :math:`(r, \varphi, z)`, builds the
+corresponding spatial and momentum grids, and constructs the external potential
+:math:`V_\mathrm{ext}` that every model then evolves in.
+"""
 import src.utils.setup_simulations as setup_simulations
 from src.library.potentials import select_potential
 from src.library.potentials_cylindrical import select_potential_cylindrical
 
 class System:
+    r"""
+    Laboratory setup shared by every simulation of a run.
+
+    Construction parses the configuration file, validates it, selects the
+    external potential and builds the grid. Only the attributes of the detected
+    coordinate system are populated; those of the other one stay ``None``.
+
+    Args:
+        app: Application object providing the device, the logger, the
+            configuration file name and the run timestamp. Both the device and
+            the logger must already be set.
+
+    Raises:
+        Exception: If the device or the logger is not set, if the coordinate
+            system is invalid, if the configuration file contains an error, or
+            if no potential could be selected.
+
+    Attributes:
+        simulation_parameters (dict): Parsed and validated simulation
+            parameters.
+        uext: The external potential object; ``uext.potential`` holds
+            :math:`V_\mathrm{ext}` on the device.
+        space_axes (list): Cartesian coordinate axes ``[x1, x2, x3]``.
+        momentum_axes (list): Cartesian momentum axes ``[p1, p2, p3]``.
+        p_sq (torch.Tensor): Squared momentum grid :math:`p^{2}` used by the
+            kinetic half-steps of the split-step propagator.
+        p_grid (tuple): Momentum meshgrids ``(px, py, pz)``.
+        space_grid: Coordinate meshgrids of the spatial grid.
+        center (tuple): Coordinates of the grid centre.
+        r (torch.Tensor): Cylindrical radial axis :math:`r`.
+        phi (torch.Tensor): Cylindrical azimuthal axis :math:`\varphi`.
+        z (torch.Tensor): Cylindrical axial axis :math:`z`.
+        kz (torch.Tensor): Axial momentum grid :math:`k_z`.
+        m_modes (torch.Tensor): Azimuthal mode numbers :math:`m`.
+        dr (float): Radial grid spacing.
+        dphi (float): Azimuthal grid spacing.
+        dz (float): Axial grid spacing.
+        eigvecs_dict (dict): Eigenvectors of the radial kinetic operator, one
+            entry per azimuthal mode :math:`m`.
+        eigvals_dict (dict): Corresponding eigenvalues.
+    """
     def __init__(self, app):
         self.app = app
         self.device = self.app.device
@@ -38,16 +87,23 @@ class System:
         self.uext = None
 
         self._initialise_parameters()
-        
-    def _initialise_parameters(self):
-        """
-        Initialise simulation parameters, external potential and grid.
 
-        Coordinate system detection (in priority order):
-        1. Explicit ``"coordinates"`` key in the config file:
+    def _initialise_parameters(self):
+        r"""
+        Initialise the simulation parameters, the external potential and the
+        grid.
+
+        The coordinate system is detected in this priority order:
+
+        1. An explicit ``"coordinates"`` key in the configuration file,
            ``"coordinates": "cylindrical"`` or ``"coordinates": "cartesian"``.
         2. Auto-detection fallback: cylindrical when ``"r_max"`` is present,
            Cartesian otherwise.
+
+        Raises:
+            Exception: If the device or logger is not set before the system, if
+                the coordinate system is invalid, if the configuration file is
+                faulty, or if no potential could be selected.
         """
         if not self.device:
             raise Exception("Device needs to be set before the system")
@@ -73,7 +129,7 @@ class System:
         else:
             self.logger.critical("Invalid coordinate system specified in config file.")
             raise Exception("Invalid coordinate system specified in config file. See log for details.")
-        
+
         if self._coord == "cylindrical":
             self.simulation_parameters, fault = \
                 setup_sims.get_simulation_parameters_cylindrical(self.configFile)
@@ -103,9 +159,15 @@ class System:
         self.logger.info(f"Potential on device {self.uext.potential.device}")
 
         self._initialise_grid()
-        
+
 
     def _initialise_grid(self):
+        r"""
+        Build the grid for the detected coordinate system.
+
+        Dispatches to :meth:`_initialise_grid_cylindrical` or
+        :meth:`_initialise_grid_cartesian`.
+        """
         assert self.simulation_parameters, "System simulation parameters not initialised"
         if self._coord == "cylindrical":
             self._initialise_grid_cylindrical()
@@ -113,7 +175,13 @@ class System:
             self._initialise_grid_cartesian()
 
     def _initialise_grid_cartesian(self):
-        """Build Cartesian (x, y, z) grid objects — unchanged original logic."""
+        r"""
+        Build the Cartesian :math:`(x, y, z)` grid objects.
+
+        Sets the coordinate and momentum axes, the squared momentum grid
+        :math:`p^{2}` used by the kinetic half-steps, the meshgrids, and the
+        grid centre.
+        """
         import src.library.gpe_library as gpe
         n1, n2, n3 = self.simulation_parameters["Grid_resolution"]
         x_min = self.simulation_parameters["x_min"]
@@ -130,7 +198,16 @@ class System:
         self.center = (x1[n1 // 2], x2[n2 // 2], x3[n3 // 2])
 
     def _initialise_grid_cylindrical(self):
-        """Build cylindrical (r, φ, z) grid and precompute radial operators."""
+        r"""
+        Build the cylindrical :math:`(r, \varphi, z)` grid and precompute the
+        radial operators.
+
+        Alongside the axes and spacings, this diagonalises the radial part of
+        the kinetic operator once per azimuthal mode :math:`m` and stores the
+        eigenvectors and eigenvalues, so that the propagator can apply
+        :math:`e^{-i T \Delta t / 2}` as a matrix product instead of an FFT in
+        :math:`r`.
+        """
         from src.library.gpe_cylindrical_library import GPECylindricalLibrary as cyl
         params = self.simulation_parameters
         n_r, n_phi, n_z = params["Grid_resolution"]
@@ -149,4 +226,3 @@ class System:
             f"Cylindrical grid: n_r={n_r}, n_phi={n_phi}, n_z={n_z}, "
             f"r_max={params['r_max']:.3f}, z=[{params['z_min']:.3f}, {params['z_max']:.3f}]"
         )
-        

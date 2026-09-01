@@ -2,8 +2,8 @@
 
 > **GPU-Accelerated Gross-Pitaevskii Equation Solver for Bose-Einstein Condensates**
 
-![Python](https://img.shields.io/badge/Python-3.7%2B-blue)
-![PyTorch](https://img.shields.io/badge/PyTorch-GPU-orange)
+![Python](https://img.shields.io/badge/Python-3.9%E2%80%933.12-blue)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.2%E2%80%932.4%20%7C%20CUDA-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Overview
@@ -56,7 +56,7 @@ Beyond zero-temperature GPE dynamics, the package includes two **finite-temperat
 ## Installation
 
 ### Prerequisites
-*   Python 3.7+
+*   Python 3.9–3.12
 *   NVIDIA GPU with CUDA support (strongly recommended for performance)
 
 ### Setup

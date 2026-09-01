@@ -1,15 +1,23 @@
-"""
+r"""
 Pure physics functions for the ZNG framework.
 
-All functions are stateless — they take tensors and scalars, return tensors.
-No simulation objects are imported here so this file can be tested in isolation.
+All functions here are stateless: they take tensors and scalars and return
+tensors. No simulation objects are imported, so this module can be tested in
+isolation.
 
-Dimensionless units throughout (ħ = m = ω_ho = 1):
-  length   → a_ho = sqrt(ħ / m ω_ho)
-  energy   → ħ ω_ho
-  momentum → ħ / a_ho
-  time     → 1 / ω_ho
-  temperature → k_B T / (ħ ω_ho)   (referred to as kT below)
+Dimensionless units are used throughout
+(:math:`\hbar = m = \omega_\mathrm{ho} = 1`):
+
+length
+    :math:`a_\mathrm{ho} = \sqrt{\hbar / m \omega_\mathrm{ho}}`
+energy
+    :math:`\hbar \omega_\mathrm{ho}`
+momentum
+    :math:`\hbar / a_\mathrm{ho}`
+time
+    :math:`1 / \omega_\mathrm{ho}`
+temperature
+    :math:`k_B T / (\hbar \omega_\mathrm{ho})`, referred to as ``kT`` below
 """
 
 import torch
@@ -18,7 +26,7 @@ from typing import Tuple
 
 
 # ---------------------------------------------------------------------------
-# Grid ↔ particle interpolation
+# Grid <-> particle interpolation
 # ---------------------------------------------------------------------------
 
 def thermal_density_from_particles(
@@ -32,42 +40,53 @@ def thermal_density_from_particles(
     device: torch.device,
     particle_weight: float = 1.0,
 ) -> torch.Tensor:
-    """
-    Deposit test-particle positions onto the 3-D grid using Cloud-In-Cell (CIC)
-    trilinear weighting to obtain the thermal number density ñ(r).
+    r"""
+    Deposit test-particle positions onto the 3-D grid to obtain the thermal
+    number density :math:`\tilde{n}(\mathbf{r})`.
 
-    CIC assigns each particle fractional weight to the 8 surrounding lattice
-    sites proportional to the overlap of a unit cell centred on the particle
-    with each grid cell.  For a particle at fractional offset (fx, fy, fz)
-    within its base cell (i0, j0, k0):
+    Cloud-In-Cell (CIC) trilinear weighting assigns each particle a fractional
+    weight to the eight surrounding lattice sites, proportional to the overlap
+    of a unit cell centred on the particle with each grid cell. For a particle
+    at fractional offset :math:`(f_x, f_y, f_z)` within its base cell
+    :math:`(i_0, j_0, k_0)`,
 
-        w[i0+di, j0+dj, k0+dk] = (fx if di==1 else 1−fx)
-                                × (fy if dj==1 else 1−fy)
-                                × (fz if dk==1 else 1−fz)
+    .. math::
 
-    The deposited count is then divided by the cell volume d_x so the result
-    has units of number density (in dimensionless a_ho units).
+        w_{i_0 + \delta_x,\, j_0 + \delta_y,\, k_0 + \delta_z}
+            = \prod_{\alpha = x, y, z}
+              \bigl[\, \delta_\alpha f_\alpha
+                     + (1 - \delta_\alpha)(1 - f_\alpha) \,\bigr],
+        \qquad \delta_\alpha \in \{0, 1\}.
+
+    The deposited count is divided by the cell volume ``d_x``, so the result
+    carries units of number density (in dimensionless :math:`a_\mathrm{ho}`
+    units).
 
     Args:
-        positions (torch.Tensor): Shape (N_test, 3), particle positions in
-            dimensionless units.  Particles outside the box are clamped to the
+        positions (torch.Tensor): Particle positions in dimensionless units,
+            shape ``(N_test, 3)``. Particles outside the box are clamped to the
             nearest boundary cell.
-        n1, n2, n3 (int): Grid point counts per dimension.
-        x_min (torch.Tensor): 1-D tensor of length 3 — lower box boundaries.
-        dx (torch.Tensor): 1-D tensor of length 3 — grid spacings per axis.
-        d_x (float): Grid cell volume = dx[0]*dx[1]*dx[2].
+        n1 (int): Number of grid points along the first axis.
+        n2 (int): Number of grid points along the second axis.
+        n3 (int): Number of grid points along the third axis.
+        x_min (torch.Tensor): Lower box boundaries, shape ``(3,)``.
+        dx (torch.Tensor): Grid spacings per axis, shape ``(3,)``.
+        d_x (float): Grid cell volume, ``dx[0] * dx[1] * dx[2]``.
         device (torch.device): Computation device.
         particle_weight (float): How many atoms one test particle stands for,
             in the same normalisation as the condensate (where
-            ``∫|psi|^2 dV = 1`` is the whole cloud). With the default of 1.0
-            the result integrates to the raw test-particle count, which puts
-            ñ on a different scale from n_c and makes every mean-field term
-            that mixes them depend on N_test. Pass
-            ``thermal_fraction / n_test`` so that ``∫ñ dV`` is the thermal
-            fraction and the physics is independent of the particle count.
+            :math:`\int \lvert \psi \rvert^{2}\, \mathrm{d}V = 1` is the whole
+            cloud). With the default of ``1.0`` the result integrates to the
+            raw test-particle count, which puts :math:`\tilde{n}` on a
+            different scale from :math:`n_c` and makes every mean-field term
+            that mixes them depend on :math:`N_\mathrm{test}`. Pass
+            ``thermal_fraction / n_test`` so that
+            :math:`\int \tilde{n}\, \mathrm{d}V` is the thermal fraction and
+            the physics is independent of the particle count.
 
     Returns:
-        torch.Tensor: Shape (n1, n2, n3), thermal number density ñ(r).
+        torch.Tensor: Thermal number density :math:`\tilde{n}(\mathbf{r})`, of
+        shape ``(n1, n2, n3)``.
     """
     x_min = x_min.to(device=device, dtype=torch.float64)
     dx = dx.to(device=device, dtype=torch.float64)
@@ -110,23 +129,27 @@ def interpolate_to_particles(
     dx: torch.Tensor,
     device: torch.device,
 ) -> torch.Tensor:
-    """
-    Trilinear interpolation of a 3-D grid field to particle positions.
+    r"""
+    Interpolate a 3-D grid field trilinearly to the particle positions.
 
-    Uses the same CIC weights as :func:`thermal_density_from_particles` but
-    reads from the grid instead of writing to it.  This is used to evaluate
-    the mean-field potential U(r_i) and forces at particle positions.
+    The CIC weights are the same as in :func:`thermal_density_from_particles`,
+    but here they read from the grid instead of writing to it. This is how the
+    mean-field potential :math:`U(\mathbf{r}_i)` and the forces are evaluated
+    at the particle positions.
 
     Args:
-        field (torch.Tensor): Shape (n1, n2, n3) — the grid-based field.
-        positions (torch.Tensor): Shape (N_test, 3) — particle positions.
-        n1, n2, n3 (int): Grid point counts.
-        x_min (torch.Tensor): Lower box boundaries, length 3.
-        dx (torch.Tensor): Grid spacings, length 3.
+        field (torch.Tensor): Grid-based field, shape ``(n1, n2, n3)``.
+        positions (torch.Tensor): Particle positions, shape ``(N_test, 3)``.
+        n1 (int): Number of grid points along the first axis.
+        n2 (int): Number of grid points along the second axis.
+        n3 (int): Number of grid points along the third axis.
+        x_min (torch.Tensor): Lower box boundaries, shape ``(3,)``.
+        dx (torch.Tensor): Grid spacings per axis, shape ``(3,)``.
         device (torch.device): Computation device.
 
     Returns:
-        torch.Tensor: Shape (N_test,) — field values at particle positions.
+        torch.Tensor: Field values at the particle positions, shape
+        ``(N_test,)``.
     """
     x_min = x_min.to(device=device, dtype=torch.float64)
     dx = dx.to(device=device, dtype=torch.float64)
@@ -158,23 +181,29 @@ def spectral_gradient_3d(
     field: torch.Tensor,
     p_grid: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Compute the 3-D gradient of a real-valued grid field using spectral
+    r"""
+    Compute the 3-D gradient of a real-valued grid field by spectral
     (FFT-based) differentiation.
 
-    In momentum space: ∂f/∂x_i = IFFT(i·p_i · FFT(f))
+    In momentum space the derivative is a multiplication,
 
-    This is the same approach used in GPELibrary.mod_grad_psi and gives
+    .. math::
+
+        \frac{\partial f}{\partial x_\alpha}
+            = \mathcal{F}^{-1}\bigl[\, i\, p_\alpha\, \mathcal{F}[f] \,\bigr],
+
+    which is the approach used in :meth:`~src.library.gpe_library.GPELibrary.mod_grad_psi` and gives
     spectral accuracy for smooth (periodic) fields.
 
     Args:
-        field (torch.Tensor): Shape (n1, n2, n3) — real-valued grid field
-            (e.g. the mean-field potential U).
-        p_grid (tuple): (px, py, pz) — 3-D momentum meshgrids, each (n1,n2,n3).
+        field (torch.Tensor): Real-valued grid field of shape ``(n1, n2, n3)``,
+            e.g. the mean-field potential :math:`U`.
+        p_grid (tuple): Momentum meshgrids ``(px, py, pz)``, each of shape
+            ``(n1, n2, n3)``.
 
     Returns:
-        tuple: (grad_x, grad_y, grad_z) — gradient components, each (n1,n2,n3),
-            real-valued.
+        tuple: The real-valued gradient components
+        ``(grad_x, grad_y, grad_z)``, each of shape ``(n1, n2, n3)``.
     """
     px, py, pz = p_grid
     field_f = torch.fft.fftn(field.to(torch.cdouble), norm='forward')
@@ -194,31 +223,40 @@ def mean_field_potential_for_thermal(
     uext: torch.Tensor,
     u: float,
 ) -> torch.Tensor:
-    """
-    Mean-field potential felt by thermal (non-condensed) atoms.
+    r"""
+    Evaluate the mean-field potential felt by thermal (non-condensed) atoms.
 
-    Thermal atoms interact with the condensate via the exchange-symmetric
-    Hartree-Fock potential.  The factor of 2 in front of the condensate density
-    arises because there are two distinct s-wave scattering channels (direct
-    and exchange) between a thermal atom and a condensate atom, whereas two
-    condensate atoms interact through only one:
+    Thermal atoms interact with the condensate through the exchange-symmetric
+    Hartree-Fock potential,
 
-        U(r) = V_ext(r) + 2u [n_c(r) + ñ(r)]
+    .. math::
 
-    This potential drives the classical equations of motion for the test
-    particles in the Monte Carlo step.
+        U(\mathbf{r}) = V_\mathrm{ext}(\mathbf{r})
+            + 2u \bigl[\, n_c(\mathbf{r}) + \tilde{n}(\mathbf{r}) \,\bigr].
 
-    Reference: E. Zaremba, T. Nikuni, A. Griffin, J. Low Temp. Phys. 116,
-               277 (1999), Eq. (2.13).
+    The factor of 2 in front of the densities arises because there are two
+    distinct s-wave scattering channels (direct and exchange) between a thermal
+    atom and a condensate atom, whereas two condensate atoms interact through
+    only one. This potential drives the classical equations of motion for the
+    test particles in the Monte Carlo step.
 
     Args:
-        n_c (torch.Tensor): Condensate density |ψ|², shape (n1, n2, n3).
-        n_tilde (torch.Tensor): Thermal density ñ, shape (n1, n2, n3).
-        uext (torch.Tensor): External trapping potential, shape (n1, n2, n3).
-        u (float): Dimensionless interaction strength g/(ħ ω_ho a_ho³).
+        n_c (torch.Tensor): Condensate density
+            :math:`n_c = \lvert \psi \rvert^{2}`, shape ``(n1, n2, n3)``.
+        n_tilde (torch.Tensor): Thermal density :math:`\tilde{n}`, shape
+            ``(n1, n2, n3)``.
+        uext (torch.Tensor): External trapping potential, shape
+            ``(n1, n2, n3)``.
+        u (float): Dimensionless interaction strength
+            :math:`g / (\hbar \omega_\mathrm{ho} a_\mathrm{ho}^{3})`.
 
     Returns:
-        torch.Tensor: U(r), shape (n1, n2, n3).
+        torch.Tensor: The potential :math:`U(\mathbf{r})`, shape
+        ``(n1, n2, n3)``.
+
+    References:
+        E. Zaremba, T. Nikuni and A. Griffin, *J. Low Temp. Phys.* **116**, 277
+        (1999), Eq. (2.13).
     """
     return uext + 2.0 * u * (n_c + n_tilde)
 
@@ -229,27 +267,37 @@ def condensate_gpe_potential(
     uext: torch.Tensor,
     u: float,
 ) -> torch.Tensor:
-    """
-    Mean-field potential that enters the condensate GPE.
+    r"""
+    Evaluate the mean-field potential that enters the condensate GPE.
 
-    The condensate feels a different mean-field from thermal atoms than
-    thermal atoms feel from each other (cf. :func:`mean_field_potential_for_thermal`):
+    The condensate feels a different mean field from the thermal atoms than
+    thermal atoms feel from each other (cf.
+    :func:`mean_field_potential_for_thermal`),
 
-        V_GP(r) = V_ext(r) + u [n_c(r) + 2ñ(r)]
+    .. math::
 
-    The factor of 2 on ñ (not on n_c) reflects the Bose enhancement of
-    scattering between a condensate atom and a thermal atom.
+        V_\mathrm{GP}(\mathbf{r}) = V_\mathrm{ext}(\mathbf{r})
+            + u \bigl[\, n_c(\mathbf{r}) + 2 \tilde{n}(\mathbf{r}) \,\bigr].
 
-    Reference: ZNG 1999, Eq. (2.9).
+    The factor of 2 on :math:`\tilde{n}` (and not on :math:`n_c`) reflects the
+    Bose enhancement of scattering between a condensate atom and a thermal
+    atom.
 
     Args:
-        n_c (torch.Tensor): Condensate density, shape (n1, n2, n3).
-        n_tilde (torch.Tensor): Thermal density ñ, shape (n1, n2, n3).
-        uext (torch.Tensor): External trapping potential, shape (n1, n2, n3).
+        n_c (torch.Tensor): Condensate density, shape ``(n1, n2, n3)``.
+        n_tilde (torch.Tensor): Thermal density :math:`\tilde{n}`, shape
+            ``(n1, n2, n3)``.
+        uext (torch.Tensor): External trapping potential, shape
+            ``(n1, n2, n3)``.
         u (float): Dimensionless interaction strength.
 
     Returns:
-        torch.Tensor: V_GP(r), shape (n1, n2, n3).
+        torch.Tensor: The potential :math:`V_\mathrm{GP}(\mathbf{r})`, shape
+        ``(n1, n2, n3)``.
+
+    References:
+        E. Zaremba, T. Nikuni and A. Griffin, *J. Low Temp. Phys.* **116**, 277
+        (1999), Eq. (2.9).
     """
     return uext + u * (n_c + 2.0 * n_tilde)
 
@@ -266,41 +314,61 @@ def condensate_source_term(
     mu: float,
     gamma_12: float,
 ) -> torch.Tensor:
-    """
-    Local-equilibrium approximation to the C_12 condensate source/sink rate R(r).
+    r"""
+    Evaluate the local-equilibrium approximation to the :math:`C_{12}`
+    condensate source/sink rate :math:`R(\mathbf{r})`.
 
-    C_12 is the collision integral that transfers atoms between the condensate
-    and the thermal cloud.  In the semiclassical local approximation (valid when
-    the thermal cloud varies slowly on the scale of the healing length):
+    :math:`C_{12}` is the collision integral that transfers atoms between the
+    condensate and the thermal cloud. In the semiclassical local approximation,
+    valid when the thermal cloud varies slowly on the scale of the healing
+    length,
 
-        R(r) = 2 γ_12 [μ − V_eff(r)]
+    .. math::
 
-    where V_eff(r) = V_ext(r) + 2u [n_c(r) + ñ(r)] is the full mean-field
-    potential that drives the thermal particle dynamics.
+        R(\mathbf{r}) = 2 \gamma_{12}
+            \bigl[\, \mu - V_\mathrm{eff}(\mathbf{r}) \,\bigr],
+        \qquad
+        V_\mathrm{eff} = V_\mathrm{ext}
+            + 2u \bigl[\, n_c + \tilde{n} \,\bigr],
 
-    Sign convention:
-        R(r) > 0  →  condensate grows   (trap centre, where V_eff < μ)
-        R(r) < 0  →  condensate shrinks (trap wings, where V_eff > μ)
+    where :math:`V_\mathrm{eff}` is the full mean-field potential that drives
+    the thermal particle dynamics. The sign convention is that :math:`R > 0`
+    grows the condensate (trap centre, where :math:`V_\mathrm{eff} < \mu`)
+    and :math:`R < 0` shrinks it (trap wings, where
+    :math:`V_\mathrm{eff} > \mu`).
 
-    R enters the modified condensate GPE as a complex source term:
+    :math:`R` enters the modified condensate GPE as a complex source term,
 
-        i ∂ψ/∂t = [H_GP + iR(r)/2] ψ
+    .. math::
 
-    The +iR/2 (not −iR/2) gives ∂|ψ|²/∂t = R|ψ², i.e. growth where R > 0.
+        i \frac{\partial \psi}{\partial t}
+            = \Bigl[\, H_\mathrm{GP}
+                     + \tfrac{i}{2} R(\mathbf{r}) \,\Bigr] \psi,
 
-    Reference: T. Nikuni, E. Zaremba, A. Griffin, PRL 83, 10 (1999), Eq. (6).
+    where the :math:`+iR/2` (rather than :math:`-iR/2`) gives
+    :math:`\partial \lvert \psi \rvert^{2} / \partial t
+    = R \lvert \psi \rvert^{2}`, i.e. growth where :math:`R > 0`.
 
     Args:
-        n_c (torch.Tensor): Condensate density, shape (n1, n2, n3).
-        n_tilde (torch.Tensor): Thermal density ñ, shape (n1, n2, n3).
-        uext (torch.Tensor): External trapping potential, shape (n1, n2, n3).
+        n_c (torch.Tensor): Condensate density, shape ``(n1, n2, n3)``.
+        n_tilde (torch.Tensor): Thermal density :math:`\tilde{n}`, shape
+            ``(n1, n2, n3)``.
+        uext (torch.Tensor): External trapping potential, shape
+            ``(n1, n2, n3)``.
         u (float): Dimensionless interaction strength.
-        mu (float): Chemical potential μ of the condensate (ħ ω_ho units).
-        gamma_12 (float): Dimensionless phenomenological rate for C_12
-            condensate↔thermal exchange.  Typical cold-atom values: 0.01–0.3.
+        mu (float): Chemical potential :math:`\mu` of the condensate, in units
+            of :math:`\hbar \omega_\mathrm{ho}`.
+        gamma_12 (float): Dimensionless phenomenological rate
+            :math:`\gamma_{12}` for the :math:`C_{12}` condensate-thermal
+            exchange. Typical cold-atom values are 0.01-0.3.
 
     Returns:
-        torch.Tensor: R(r), shape (n1, n2, n3), real-valued.
+        torch.Tensor: The real-valued rate :math:`R(\mathbf{r})`, shape
+        ``(n1, n2, n3)``.
+
+    References:
+        T. Nikuni, E. Zaremba and A. Griffin, *Phys. Rev. Lett.* **83**, 10
+        (1999), Eq. (6).
     """
     v_eff = uext + 2.0 * u * (n_c + n_tilde)
     return 2.0 * gamma_12 * (mu - v_eff)
@@ -316,40 +384,54 @@ def sample_initial_thermal_cloud(
     kT: float,
     device: torch.device,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
+    r"""
     Sample initial test-particle positions and momenta for the thermal cloud.
 
-    Uses the semiclassical Boltzmann distribution in the harmonic-oscillator
-    approximation.  For a trap with dimensionless frequencies
-    ω = (ω_x, ω_y, ω_z) / ω_ho (the ``w`` argument below), the thermal
-    equilibrium distribution is:
+    The semiclassical Boltzmann distribution is used in the harmonic-oscillator
+    approximation. For a trap with dimensionless frequencies
+    :math:`(\omega_x, \omega_y, \omega_z) / \omega_\mathrm{ho}` (the ``w``
+    argument below), the thermal equilibrium distribution is
 
-        f(r, p) ∝ exp[−β (p²/2 + V_trap(r))]
+    .. math::
 
-    where β = 1/kT (dimensionless) and V_trap = ½ Σ ω_i² x_i².
+        f(\mathbf{r}, \mathbf{p}) \propto
+            \exp\Bigl[ -\beta \bigl(
+                \tfrac{1}{2} p^{2} + V_\mathrm{trap}(\mathbf{r})
+            \bigr) \Bigr],
+        \qquad
+        V_\mathrm{trap}
+            = \tfrac{1}{2} \sum_\alpha \omega_\alpha^{2} x_\alpha^{2},
 
-    This factorises: positions and momenta are sampled independently.
+    with :math:`\beta = 1 / kT` dimensionless. This factorises, so positions
+    and momenta are sampled independently:
 
-    Position sampling (exact for a harmonic trap):
-        x_i ~ Normal(0, σ_x)   with  σ_x = √(kT) / ω_x
+    .. math::
 
-    Momentum sampling (Maxwell-Boltzmann, valid for any trap):
-        p_i ~ Normal(0, √kT)
+        x_\alpha \sim \mathcal{N}\bigl(0, \sigma_\alpha^{2}\bigr),
+        \quad \sigma_\alpha = \frac{\sqrt{kT}}{\omega_\alpha},
+        \qquad
+        p_\alpha \sim \mathcal{N}\bigl(0, kT\bigr).
 
-    For an anharmonic trap the position distribution is approximate; running
-    the simulation for a few trap periods thermalises the cloud to the correct
-    shape.
+    The position sampling is exact for a harmonic trap and the
+    Maxwell-Boltzmann momenta are valid for any trap. For an anharmonic trap
+    the position distribution is approximate, but running the simulation for a
+    few trap periods thermalises the cloud to the correct shape.
 
     Args:
-        n_test (int): Number of test particles N_test.
-        w (torch.Tensor): Dimensionless trap frequencies (ω_x, ω_y, ω_z) / ω_ho,
-            shape (3,).  Obtain from system.simulation_parameters["w"].
-        kT (float): Dimensionless temperature k_B T / (ħ ω_ho).
+        n_test (int): Number of test particles :math:`N_\mathrm{test}`.
+        w (torch.Tensor): Dimensionless trap frequencies
+            :math:`(\omega_x, \omega_y, \omega_z) / \omega_\mathrm{ho}`, shape
+            ``(3,)``. Obtain from ``system.simulation_parameters["w"]``.
+        kT (float): Dimensionless temperature
+            :math:`k_B T / (\hbar \omega_\mathrm{ho})`.
         device (torch.device): Computation device.
 
     Returns:
-        positions (torch.Tensor): Shape (N_test, 3), sampled positions.
-        momenta  (torch.Tensor): Shape (N_test, 3), sampled momenta.
+        tuple: The pair ``(positions, momenta)``, each a ``torch.Tensor`` of
+        shape ``(N_test, 3)``.
+
+    Raises:
+        ValueError: If ``kT`` is not strictly positive.
     """
     if kT <= 0.0:
         raise ValueError("kT must be > 0 to sample a thermal cloud.")

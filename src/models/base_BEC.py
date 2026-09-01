@@ -1,7 +1,10 @@
-"""
-Base BEC class with common functionality.
-This class provides the core functionality for BEC simulations.
-Extend this class and override methods as needed for custom simulations.
+r"""
+Base BEC class with the functionality common to every model.
+
+:class:`BaseBEC` provides the core machinery for BEC simulations: ground-state
+initialisation, split-step time evolution, parameter management, dark-soliton
+imprinting and data output. Extend it and override methods as needed for custom
+simulations.
 """
 from typing import Optional, Dict, Any
 import logging
@@ -16,39 +19,52 @@ from sys import platform
 
 
 class BaseBEC:
-    """
-    Base class for Bose-Einstein Condensate simulations.
-    
-    This class provides common functionality including:
-    - Ground state initialization
+    r"""
+    Base class for Bose-Einstein condensate simulations.
 
-    
-    - Time evolution using split-step Fourier method
-    
-    - Parameter management
-    
-    - Data output and logging
-    
+    The class provides:
+
+    - ground-state initialisation,
+    - time evolution with the split-step Fourier method,
+    - parameter management,
+    - data output and logging.
+
+    Both coordinate systems are supported: all coordinate-dependent branches
+    key off ``self._coord``, which is taken from the
+    :class:`~src.models.system.System` object, and the matching library is
+    bound to ``self._lib``.
+
     To create a custom simulation:
-    
-    1. Inherit from this class
-    
-    2. Override _main_simulation_loop() to implement custom physics
-    
-    3. Override _initialize_custom_parameters() for simulation-specific parameters
-    
-    4. Override _write_custom_outputs() for additional output files
+
+    1. Inherit from this class.
+    2. Override :meth:`_main_simulation_loop` to implement the custom physics.
+    3. Override :meth:`_initialize_custom_parameters` for simulation-specific
+       parameters.
+    4. Override :meth:`_write_custom_outputs` for additional output files.
+
+    Attributes:
+        psi (torch.Tensor): Condensate wavefunction :math:`\psi(\mathbf{r})`,
+            ``None`` until :meth:`_initialise` has run.
+        gs_path (str): Path of the ground-state file the wavefunction was read
+            from.
     """
-    
+
     def __init__(self, parameters: Dict[str, Any], system: Any, app: Any, simulation_name: str) -> None:
-        """
-        Initialize the BEC simulation.
-        
+        r"""
+        Initialise the BEC simulation.
+
         Args:
-            parameters: dict, simulation-specific parameters
-            system: System object containing grid, potential, etc.
-            app: Application object with device, logger, etc.
-            simulation_name: str, name of this simulation
+            parameters (dict): Simulation-specific parameters for this run.
+            system (System): System object carrying the grid, the external
+                potential and the coordinate system.
+            app: Application object providing the device, the logger and the
+                run timestamp.
+            simulation_name (str): Name of this simulation, used for the output
+                file names.
+
+        Raises:
+            ValueError: If ``app`` or ``system`` is ``None``, or if the
+                coordinate system is not set on the system object.
         """
         if app is None:
             raise ValueError("app must not be None")
@@ -94,12 +110,23 @@ class BaseBEC:
         # self.analysis_results = {}
 
     def _find_ground_state(self) -> None:
-        """
-        Finds the ground state for the BEC in the system.
-        If the file already exists it is loaded directly; otherwise it is computed.
+        r"""
+        Find the ground state for the BEC in this system.
 
-        Cartesian filename: ``{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat``
-        Cylindrical filename: ``{n_r}x{n_phi}x{n_z}_{fr}_{fz}Hz_ground_state_cyl.dat``
+        If the ground-state file already exists it is used directly; otherwise
+        it is computed first. The file lives in the parent directory of the
+        simulation folder, so that runs sharing a grid and a trap reuse it, and
+        its path is stored in ``self.gs_path``. The naming convention is
+
+        Cartesian
+            ``{n1}x{n2}x{n3}_{fx}_{fy}_{fz}Hz_ground_state.dat``
+        Cylindrical
+            ``{n_r}x{n_phi}x{n_z}_{fr}_{fz}Hz_ground_state_cyl.dat``
+
+        Raises:
+            KeyError: If ``Grid_resolution`` or ``Trapping_frequencies`` is
+                missing from the simulation parameters.
+            OSError: On a file-system error while locating or writing the file.
         """
         try:
             n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
@@ -139,16 +166,22 @@ class BaseBEC:
             raise
         finally:
             os.chdir(cur_path)
-    
+
     def _initialise(self) -> None:
-        """
-        Reads the ground state file and initialises the wavefunction to ground state.
-        
-        Override this method if you need custom initialization logic.
+        r"""
+        Read the ground-state file and initialise the wavefunction to it.
+
+        Override this method if a custom initialisation is needed, for example
+        an initial phase imprint or an amplitude modification. Re-initialising
+        an already initialised BEC overwrites :math:`\psi` and logs a warning.
+
+        Raises:
+            ValueError: If the ground-state path is still ``None`` after
+                :meth:`_find_ground_state`.
         """
         if self.psi is not None:
             self.logger.warning("Trying to initialise an already initialised BEC. It will overwrite.")
-        
+
         try:
             self._find_ground_state()
             n1, n2, n3 = self.system.simulation_parameters["Grid_resolution"]
@@ -159,27 +192,32 @@ class BaseBEC:
         except Exception:
             self.logger.exception("Failed to initialise BEC.")
             raise
-        
+
         # TODO: Add custom initialization if needed
         # Example: apply initial phase imprinting, modify amplitude, etc.
-    
+
     def _step(self, utot: torch.Tensor, dtau: float,
               p_sq: torch.Tensor = None, d_x: float = None) -> None:
-        """
-        Performs a single time step using the split-step Fourier method.
+        r"""
+        Perform a single time step with the split-step Fourier method.
 
-        Cartesian: ``_step(utot, dtau, p_sq, d_x)`` — explicit momentum grid and
-        volume element are required.
-
-        Cylindrical: ``_step(utot, dtau)`` — the kinetic operator is applied via
-        the precomputed radial eigendecomposition stored on ``self`` (set up by
-        ``_initialize_simulation_parameters``).
+        In Cartesian coordinates, call it as ``_step(utot, dtau, p_sq, d_x)``:
+        the momentum grid and the volume element must be given explicitly. In
+        cylindrical coordinates, call it as ``_step(utot, dtau)``: the kinetic
+        operator is applied through the precomputed radial eigendecomposition
+        stored on ``self`` by :meth:`_initialize_simulation_parameters`.
 
         Args:
-            utot  : total potential (interaction + external).
-            dtau  : time step size.
-            p_sq  : squared momentum grid (Cartesian only).
-            d_x   : flat volume element (Cartesian only).
+            utot (torch.Tensor): Total potential, interaction plus external.
+            dtau (float): Dimensionless time step
+                :math:`\Delta\tau = \omega_\mathrm{ho} \Delta t`.
+            p_sq (torch.Tensor): Squared momentum grid :math:`p^{2}` (Cartesian
+                only).
+            d_x (float): Flat volume element (Cartesian only).
+
+        Raises:
+            RuntimeError: If the condensate wavefunction has not been
+                initialised.
         """
         if self.psi is None:
             raise RuntimeError("BEC wavefunction (psi) is not initialized.")
@@ -192,52 +230,73 @@ class BaseBEC:
             )
         else:
             self.psi = self._lib.split_step_step(self.psi, utot, dtau, p_sq, d_x)
-    
+
     def _apply_three_body_loss(self, dtau: float) -> None:
-        """
-        Apply the three-body loss factor exp(-k3 |psi|^4 dtau) in place.
+        r"""
+        Apply the three-body loss factor
+        :math:`\exp(-K_3 \lvert \psi \rvert^{4} \Delta\tau)` in place.
 
         This is the loss written as its own operator rather than as an
         imaginary part of the potential. The template loop folds it into
         ``utot`` instead, which is exact there because every other factor in
         the split step is unitary. Inside the SGPE it is not: the propagator
-        carries an ``(i + gamma)`` prefactor, so an imaginary ``utot`` would
-        give the right decay multiplied by a spurious phase of order
-        ``gamma * k3 * |psi|^4 * dtau``. Applying the loss separately keeps the
-        SGPE in its standard form,
+        carries an :math:`(i + \gamma)` prefactor, so an imaginary ``utot``
+        would give the right decay multiplied by a spurious phase of order
+        :math:`\gamma K_3 \lvert \psi \rvert^{4} \Delta\tau`. Applying the loss
+        separately keeps the SGPE in its standard form,
 
-            dpsi/dt = -(i + gamma)(H_mf - mu) psi - k3 |psi|^4 psi + noise
+        .. math::
+
+            \frac{\partial \psi}{\partial t}
+                = -(i + \gamma)\bigl(H_\mathrm{mf} - \mu\bigr) \psi
+                  - K_3 \lvert \psi \rvert^{4} \psi
+                  + \eta .
+
+        The call is a no-op when :math:`K_3` is zero or the wavefunction has
+        not been initialised.
 
         Args:
-            dtau: time increment to apply the loss over. Strang-split callers
-                pass half a step before and half after the propagator.
+            dtau (float): Time increment to apply the loss over. Strang-split
+                callers pass half a step before and half after the propagator.
         """
         if not self.k3 or self.psi is None:
             return
         self.psi = torch.exp(-self.k3 * torch.abs(self.psi) ** 4 * dtau) * self.psi
 
     def _extract_phase(self) -> torch.Tensor:
-        """
-        Returns the phase of the condensate wavefunction.
-        
+        r"""
+        Return the phase of the condensate wavefunction.
+
         Returns:
-            torch.Tensor, the phase of the wavefunction
+            torch.Tensor: The phase :math:`\arg \psi(\mathbf{r})`, of the same
+            shape as :math:`\psi`.
+
+        Raises:
+            RuntimeError: If the condensate wavefunction has not been
+                initialised.
         """
         if self.psi is None:
              raise RuntimeError("BEC wavefunction (psi) is not initialized.")
         return cu.extract_phase(self.psi)
 
     def evolve(self) -> None:
-        """
-        Main evolution method. This orchestrates the entire simulation.
-        
-        The typical flow is:
-        1. Initialize parameters
-        2. Initialize wavefunction to ground state
-        3. Run the main simulation loop
-        4. Write outputs
-        
-        Override this if you need a completely different simulation structure.
+        r"""
+        Run the whole simulation.
+
+        This is the entry point called by
+        :meth:`~src.models.simulation.Simulations.run_simulations`, and it
+        orchestrates the typical flow:
+
+        1. Initialise the parameters.
+        2. Initialise the wavefunction to the ground state.
+        3. Run the main simulation loop.
+        4. Write the outputs.
+
+        Override this if a completely different simulation structure is needed.
+
+        Raises:
+            Exception: Whatever any of the four stages raises, after logging
+                it.
         """
         try:
             # Get the parameters for easy access
@@ -248,7 +307,7 @@ class BaseBEC:
 
             # TODO: Add any pre-evolution setup here
             # Example: calculate special phases, set up diagnostics, etc.
-            
+
             # Evolve the BEC
             self._main_simulation_loop()
 
@@ -259,23 +318,35 @@ class BaseBEC:
             raise
 
     def _get_snapshot_interval(self) -> Optional[int]:
-        """
-        Returns the iteration interval used for snapshot writes.
+        r"""
+        Return the iteration interval between snapshot writes.
 
-        Returns None when snapshots are disabled.
+        Returns:
+            int or None: ``max(1, kmax // shots)``, or ``None`` when snapshots
+            are disabled (``shots <= 0``).
         """
         if self.shots <= 0:
             return None
         return max(1, self.kmax // self.shots)
 
     def _initialize_simulation_parameters(self) -> None:
-        """
-        Initializes simulation parameters for easy access.
-        
-        This extracts commonly used parameters from the system and stores them
-        as instance variables for faster access during the simulation loop.
-        
+        r"""
+        Extract the simulation parameters for fast access during the loop.
+
+        The commonly used parameters are pulled out of the system object and
+        stored as instance attributes, the coordinate-specific grid parameters
+        are loaded, the measurement arrays are allocated, and the two
+        subclass hooks :meth:`_initialize_custom_parameters` and
+        :meth:`_initialize_dark_soliton_parameters` are called.
+
         Override or extend this method to add custom parameters.
+
+        Raises:
+            KeyError: If a required simulation parameter is missing.
+            AttributeError: If a required attribute of the system object is
+                missing.
+            ValueError: If the external potential is ``None``, or if ``kmax``,
+                ``shots`` or the grid resolution are out of range.
         """
         try:
             params = self.system.simulation_parameters
@@ -333,17 +404,20 @@ class BaseBEC:
         except ValueError:
             self.logger.exception("Invalid simulation parameter values.")
             raise
-            
-    def _initialize_custom_parameters(self) -> None:
-        """
-        Initialize custom simulation-specific parameters.
 
-        Override this method in your derived class to set up additional parameters.
+    def _initialize_custom_parameters(self) -> None:
+        r"""
+        Initialise custom simulation-specific parameters.
+
+        This is a hook: the base implementation does nothing. Override it in a
+        derived class to set up additional parameters.
 
         Example:
-            def _initialize_custom_parameters(self):
-                self.my_custom_param = self.parameters.get("my_param", default_value)
-                self.special_measurements = []
+            ::
+
+                def _initialize_custom_parameters(self):
+                    self.my_custom_param = self.parameters.get("my_param", default_value)
+                    self.special_measurements = []
         """
         # TODO: Add your custom parameter initialization here
         pass
@@ -354,14 +428,16 @@ class BaseBEC:
     # has no soliton library. BEC has its own standalone implementation.
     # ------------------------------------------------------------------
     def _initialize_dark_soliton_parameters(self) -> None:
-        """
-        Read this simulation's dark-soliton parameters from ``self.parameters``.
+        r"""
+        Read this simulation's dark-soliton parameters from
+        ``self.parameters``.
 
-        Dark solitons are configured per simulation (one flat list of values for
-        this simulation), enabled by the global ``dark_soliton`` flag. Sets
-        ``self._soliton_enabled`` / ``self._soliton_imprinted``, which the
-        per-iteration hook :meth:`_maybe_imprint_solitons` keys off. Supported
-        only for Cartesian grids.
+        Dark solitons are configured per simulation (one flat list of values
+        for this simulation), enabled by the global ``dark_soliton`` flag. This
+        sets ``self._soliton_enabled`` and ``self._soliton_imprinted``, which
+        the per-iteration hook :meth:`_maybe_imprint_solitons` keys off.
+        Supported only for Cartesian grids; on a cylindrical grid it warns and
+        disables imprinting.
         """
         self._soliton_enabled = False
         self._soliton_imprinted = False
@@ -391,7 +467,14 @@ class BaseBEC:
         )
 
     def _imprint_dark_solitons(self) -> None:
-        """Create and apply this simulation's dark-soliton mask to the wavefunction."""
+        r"""
+        Create this simulation's dark-soliton mask and apply it to the
+        wavefunction.
+
+        Raises:
+            RuntimeError: If the condensate wavefunction has not been
+                initialised.
+        """
         if self.psi is None:
             raise RuntimeError("BEC wavefunction (psi) is not initialized.")
         try:
@@ -413,12 +496,16 @@ class BaseBEC:
             raise
 
     def _maybe_imprint_solitons(self, iteration: int) -> None:
-        """
+        r"""
         Imprint this simulation's solitons when the loop reaches the configured
-        snapshot. Safe no-op when solitons are disabled or already imprinted.
+        snapshot.
 
-        Subclasses that override :meth:`_main_simulation_loop` should call this
-        once per iteration to inherit dark-soliton support.
+        This is a safe no-op when solitons are disabled or have already been
+        imprinted. Subclasses that override :meth:`_main_simulation_loop`
+        should call it once per iteration to inherit dark-soliton support.
+
+        Args:
+            iteration (int): Current iteration number of the simulation loop.
         """
         if not getattr(self, "_soliton_enabled", False) or self._soliton_imprinted:
             return
@@ -433,7 +520,13 @@ class BaseBEC:
     # ------------------------------------------------------------------
 
     def _init_cartesian_grid_params(self, params: dict) -> None:
-        """Load Cartesian grid objects from the system object."""
+        r"""
+        Load the Cartesian grid objects from the system object.
+
+        Args:
+            params (dict): Simulation parameters, read for the grid spacings
+                ``dx`` and the volume element ``d_x``.
+        """
         self.p_sq  = self.system.p_sq
         self.p_grid = self.system.p_grid
         self.x1, self.x2, self.x3 = self.system.space_axes
@@ -442,19 +535,31 @@ class BaseBEC:
         self.d_x = params["d_x"]
 
     def _init_cylindrical_grid_params(self, params: dict) -> None:
-        """
-        Build or load cylindrical grid objects.
+        r"""
+        Build or load the cylindrical grid objects.
 
         If the system object already carries pre-built cylindrical grid
-        attributes (``system.r``, ``system.kz``, etc.) they are reused directly.
-        Otherwise the grid is built from the scalar parameters in ``params``.
+        attributes (``system.r``, ``system.kz``, and so on) they are reused
+        directly. Otherwise the grid is built from the scalar parameters in
+        ``params``.
 
-        Sets the following instance attributes:
-            r, phi, z          – 1-D coordinate arrays
-            kz, m_modes        – spectral grids
-            dr, dphi, dz       – spacings
-            eigvecs_dict, eigvals_dict – precomputed radial kinetic eigendecomp
-            n_r, n_phi, n_z    – dimensional aliases (same objects as n1, n2, n3)
+        The following instance attributes are set:
+
+        ``r``, ``phi``, ``z``
+            1-D coordinate arrays.
+        ``kz``, ``m_modes``
+            Spectral grids, the axial momentum :math:`k_z` and the azimuthal
+            mode numbers :math:`m`.
+        ``dr``, ``dphi``, ``dz``
+            Grid spacings.
+        ``eigvecs_dict``, ``eigvals_dict``
+            Precomputed eigendecomposition of the radial kinetic operator.
+        ``n_r``, ``n_phi``, ``n_z``
+            Dimensional aliases (the same objects as ``n1``, ``n2``, ``n3``).
+
+        Args:
+            params (dict): Simulation parameters, read for ``r_max``,
+                ``z_min`` and ``z_max`` when the grid has to be built.
         """
         self.n_r   = self.n1
         self.n_phi = self.n2
@@ -485,29 +590,55 @@ class BaseBEC:
             )
 
     def _main_simulation_loop(self) -> None:
-        """
-        Main loop for evolving the BEC system.
-        
-        This is a TEMPLATE method that should be overridden for custom simulations.
-        The default implementation provides a basic time evolution with measurements.
-        
-        Common modifications:
-        - Add custom physics (e.g., vortex imprinting, stirring, etc.)
-        - Implement time-dependent potentials
-        - Add special measurement/diagnostic routines
-        - Implement adaptive time stepping
+        r"""
+        Evolve the BEC system.
+
+        This is a *template* method, meant to be overridden for custom
+        simulations. The default implementation provides a basic time evolution
+        with measurements: at each iteration it rebuilds the total potential
+        from the current :math:`\psi`, writes a snapshot at the configured
+        interval, imprints dark solitons if they are due, takes one split step,
+        and advances the time-dependent external potential.
+
+        A non-zero three-body rate enters here as an imaginary part of the
+        potential,
+
+        .. math::
+
+            U_\mathrm{tot} = u \lvert \psi \rvert^{2} + V_\mathrm{ext}
+                - i K_3 \lvert \psi \rvert^{4},
+
+        which is exact in this loop because every other factor of the split
+        step is unitary: the real-space factor
+        :math:`e^{-i \Delta\tau (V + iL) / 2}` splits into a unitary phase
+        times the amplitude decay :math:`e^{\Delta\tau L / 2}`, so atoms are
+        genuinely removed rather than reshuffled. Inside the SGPE this is no
+        longer true, which is why
+        :class:`~src.models.finite_temp_BEC.FiniteTempBEC` applies
+        :meth:`_apply_three_body_loss` as a separate operator instead.
+
+        Common modifications when overriding:
+
+        - add custom physics such as vortex imprinting or stirring,
+        - implement time-dependent potentials,
+        - add special measurement or diagnostic routines,
+        - implement adaptive time stepping.
+
+        Raises:
+            RuntimeError: If the condensate wavefunction has not been
+                initialised.
         """
         if self.psi is None:
             raise RuntimeError("BEC wavefunction (psi) is not initialized.")
         count = 0
         iteration = 0
         snapshot_interval = self._get_snapshot_interval()
-        
+
         # TODO: Add any pre-loop initialization
         # Example: open diagnostic files, initialize counters, etc.
-        
+
         self.logger.info("Starting main simulation loop...")
-        
+
         try:
             for iteration in range(self.kmax):
                 # Current time
@@ -554,26 +685,28 @@ class BaseBEC:
                 # picks up the updated uext when computing utot.
                 if hasattr(self.system.uext, 'evol'):
                     self.uext = self.system.uext.evol(t)
-            
+
             self.logger.info(f"Simulation loop completed. Total iterations: {self.kmax}")
         except Exception as e:
             self.logger.exception(f"Error in main simulation loop at iteration {iteration}.")
             raise
-        
+
         # TODO: Add any post-loop cleanup or final measurements
 
     def _write_iteration_data(self, count: int, t: float) -> None:
-        """
-        Writes data for the current iteration.
-        
+        r"""
+        Write the diagnostics for the current snapshot.
+
         This is called at regular intervals during the simulation to save
-        snapshots of the system state.
-        
+        snapshots of the system state, and dispatches to the Cartesian or the
+        cylindrical writer. Out-of-range snapshot indices, and an uninitialised
+        wavefunction, are skipped with a log message rather than raising.
+
         Override or extend this to add custom measurements or outputs.
-        
+
         Args:
-            count: int, snapshot counter
-            t: float, current time
+            count (int): Snapshot counter, expected in ``[0, shots)``.
+            t (float): Current simulation time.
         """
         if self.psi is None:
              self.logger.error("Skipping write_iteration_data because psi is None.")
@@ -593,7 +726,7 @@ class BaseBEC:
         except Exception as e:
             self.logger.exception(f"Error writing iteration data at step {count}.")
             raise
-        
+
         # TODO: Add custom measurements here
         # Examples:
         # - self.custom_observable[count] = self._calculate_custom_quantity()
@@ -601,7 +734,17 @@ class BaseBEC:
         # - self._save_special_diagnostic(count)
 
     def _write_iteration_data_cartesian(self, count: int, t: float) -> None:
-        """Snapshot diagnostics for a Cartesian (x, y, z) grid."""
+        r"""
+        Write the snapshot diagnostics for a Cartesian :math:`(x, y, z)` grid.
+
+        Saves the density data, optionally the phase image, and records the RMS
+        radius, the cross-section line density :math:`n(x)` and the energy
+        allocation for this snapshot.
+
+        Args:
+            count (int): Snapshot counter.
+            t (float): Current simulation time.
+        """
         rw.write_data(self.psi, count, self.x1, self.x3, self.n1, self.n3, self.a_ho, self.dx)
 
         if hasattr(self.app, 'phase_imaging') and self.app.phase_imaging:
@@ -620,7 +763,30 @@ class BaseBEC:
         self.logger.info(f"t = {t / self.omega_ho}")
 
     def _write_iteration_data_cylindrical(self, count: int, t: float) -> None:
-        """Snapshot diagnostics for a cylindrical (r, φ, z) grid."""
+        r"""
+        Write the snapshot diagnostics for a cylindrical
+        :math:`(r, \varphi, z)` grid.
+
+        The quantities recorded are the column density
+        :math:`n(r, z) = \int \lvert \psi \rvert^{2}\, \mathrm{d}\varphi`,
+        optionally the phase at the :math:`\varphi = 0` cross-section, the RMS
+        radius :math:`\langle r^{2} \rangle^{1/2}` taken with the cylindrical
+        volume element
+        :math:`\mathrm{d}V = r\, \mathrm{d}r\, \mathrm{d}\varphi\, \mathrm{d}z`,
+        the radial density profile at the :math:`z` midplane,
+
+        .. math::
+
+            n(r) = \sum_\varphi
+                \bigl\lvert \psi[:, :, n_z / 2] \bigr\rvert^{2}\,
+                \mathrm{d}\varphi,
+
+        and the energy allocation.
+
+        Args:
+            count (int): Snapshot counter.
+            t (float): Current simulation time.
+        """
         # Column density n(r, z) = ∫|ψ|² dφ
         rw.write_data_cylindrical(
             self.psi, count, self.r, self.phi, self.n_r, self.n_phi, self.a_ho, self.dz
@@ -651,26 +817,28 @@ class BaseBEC:
         self.logger.info(f"t = {t / self.omega_ho}")
 
     def _write_simulation_outputs(self) -> None:
-        """
-        Writes various output files after the simulation.
-        
-        This is called once at the end of the simulation to generate
-        final output files, plots, and videos.
-        
+        r"""
+        Write the output files produced at the end of the simulation.
+
+        This is called once, after the main loop, and writes the RMS
+        measurements and their figure, the cross-section data, the energy
+        terms, and the density (and optionally velocity) videos. The subclass
+        hook :meth:`_write_custom_outputs` is called last.
+
         Override or extend this to add custom outputs.
         """
         try:
             # Write RMS measurements
             rw.write_rms(self.rms_measurements, self.simulation_name)
             rw.save_rms_figure(f"{self.simulation_name}_RMS_meas.txt")
-            
+
             # Write cross-section data
             rw.save_cross_section_line_figure(self.cross_line)
             rw.save_tensor_to_csv(self.cross_line, "cross_line_density.csv")
-            
+
             # Write energy data
             rw.write_energy_terms(self.energies, "energies.txt")
-            
+
             # Create visualization videos
             n_frames = len(self.rms_measurements)
             if self._coord == "cylindrical":
@@ -703,40 +871,46 @@ class BaseBEC:
                         self.n1,
                         self.n3,
                     )
-            
+
             # TODO: Write custom outputs
             self._write_custom_outputs()
-            
+
             self.logger.info(f"All outputs written for simulation: {self.simulation_name}")
         except Exception as e:
             self.logger.exception("Error writing final simulation outputs.")
             raise
-    
+
     def _write_custom_outputs(self) -> None:
-        """
+        r"""
         Write custom simulation-specific outputs.
-        
-        Override this method in your derived class to save additional data.
-        
+
+        This is a hook: the base implementation does nothing. Override it in a
+        derived class to save additional data.
+
         Example:
-            def _write_custom_outputs(self):
-                np.save('my_data.npy', self.custom_data)
-                with open('analysis.txt', 'w') as f:
-                    f.write(str(self.analysis_results))
+            ::
+
+                def _write_custom_outputs(self):
+                    np.save('my_data.npy', self.custom_data)
+                    with open('analysis.txt', 'w') as f:
+                        f.write(str(self.analysis_results))
         """
         # TODO: Add your custom output writing here
         pass
 
     # Utility methods that might be useful
-    
+
     def get_density(self) -> torch.Tensor:
-        """
-        Returns the density |psi|^2 of the condensate.
-        
+        r"""
+        Return the condensate density :math:`\lvert \psi \rvert^{2}`.
+
         Returns:
-            torch.Tensor, density of the wavefunction
+            torch.Tensor: The density, of the same shape as :math:`\psi`.
+
+        Raises:
+            RuntimeError: If the condensate wavefunction has not been
+                initialised.
         """
         if self.psi is None:
             raise RuntimeError("BEC wavefunction (psi) is not initialized.")
         return torch.abs(self.psi) ** 2
-

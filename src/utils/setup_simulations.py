@@ -1,14 +1,17 @@
-"""
+r"""
 Utilities for setting up and configuring GPE simulations.
 
-This module provides common functions for reading configuration files, setting up simulation
-parameters, validating inputs, and creating simulation directories.
+This module reads the configuration files, expands them into the individual
+simulations of a run, validates the inputs and creates the simulation
+directories. A configuration may specify several vortex charges, soliton
+positions and so on; each entry becomes its own simulation, with its own folder
+and its own parameter dictionary.
 """
 
 import json
 import os
 
-# minimum required for all simulations
+#: Keys every simulation configuration must define.
 REQUIRED_SIMULATION_CONFIG_KEYS = [
     "Grid_resolution",
     "Grid_negative_limits",
@@ -21,7 +24,8 @@ REQUIRED_SIMULATION_CONFIG_KEYS = [
     "SwitchOff_time",
 ]
 
-# minimum required for vortex excitation settings (when vortex_excitation is True)
+#: Keys required by the vortex excitation settings, when ``vortex_excitation``
+#: is true.
 REQUIRED_VORTEX_KEYS = [
     "vortex_excitation",
     "vortex_charge",
@@ -30,7 +34,7 @@ REQUIRED_VORTEX_KEYS = [
     "initial_imprint_time",
 ]
 
-# required for repetitive imprinting scenarios (when repetitive is 1)
+#: Keys required by repetitive imprinting scenarios, when ``repetitive`` is 1.
 REQUIRED_REPETITIVE_IMPRINTING_KEYS = [
     "imprint_every",
     "max_imprints",
@@ -48,7 +52,18 @@ REQUIRED_REPETITIVE_IMPRINTING_KEYS = [
 
 
 def _require_keys(data, required_keys, context):
-    """Raise a ValueError when one or more required keys are missing."""
+    r"""
+    Check that every required key is present.
+
+    Args:
+        data (dict): Mapping to check.
+        required_keys (list[str]): Keys that must be present.
+        context (str): Short description of what is being validated, used in
+            the error message.
+
+    Raises:
+        ValueError: If one or more required keys are missing.
+    """
     missing = [key for key in required_keys if key not in data]
     if missing:
         missing_str = ", ".join(sorted(missing))
@@ -60,7 +75,22 @@ def _require_keys(data, required_keys, context):
 # =============================================================================
 
 def _load_json_from_cwd(config_file):
-    """Load and parse a JSON file located relative to the current working directory."""
+    r"""
+    Load and parse a JSON file located relative to the current working
+    directory.
+
+    Args:
+        config_file (str): File name or relative path of the JSON file.
+
+    Returns:
+        dict: The parsed contents of the file.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        ValueError: If the path is not a file, or the contents are not valid
+            JSON.
+        OSError: If the file exists but cannot be read.
+    """
     path_config_file = os.path.join(os.getcwd(), config_file)
 
     if not os.path.exists(path_config_file):
@@ -78,25 +108,19 @@ def _load_json_from_cwd(config_file):
 
 
 def get_application_config(config_file="appConfig.json"):
-    """
+    r"""
     Read the application configuration file.
-    
-    Parameters
-    ----------
-    config_file : str, optional
-        Path to the application configuration file, by default "appConfig.json".
-    
-    Returns
-    -------
-    dict
-        Dictionary containing the application configuration parameters.
-    
-    Raises
-    ------
-    FileNotFoundError
-        If the configuration file does not exist.
-    ValueError
-        If the configuration file is not valid JSON.
+
+    Args:
+        config_file (str): Path to the application configuration file, by
+            default ``"appConfig.json"``.
+
+    Returns:
+        dict: The application configuration parameters.
+
+    Raises:
+        FileNotFoundError: If the configuration file does not exist.
+        ValueError: If the configuration file is not valid JSON.
     """
     return _load_json_from_cwd(config_file)
 
@@ -107,7 +131,19 @@ def get_application_config(config_file="appConfig.json"):
 # =============================================================================
 
 def _format_name_component(values):
-    """Format scalar/list values into compact simulation-name components."""
+    r"""
+    Format a scalar or a list into a compact simulation-name component.
+
+    Lists are joined with underscores, ignoring blank entries. A list of more
+    than ten entries is abbreviated to its first and last values, so that the
+    folder name stays a usable length.
+
+    Args:
+        values: Scalar or list of values to format.
+
+    Returns:
+        str: The formatted name component.
+    """
     if isinstance(values, list):
         cleaned_values = [value for value in values if value != " "]
         if len(cleaned_values) > 10:
@@ -117,7 +153,15 @@ def _format_name_component(values):
 
 
 def _ensure_simulation_directory(simulation_name):
-    """Create a simulation directory when missing and log directory status."""
+    r"""
+    Create a simulation directory when it is missing, and report its status.
+
+    An existing directory is left alone, with a printed warning that its data
+    will be overwritten.
+
+    Args:
+        simulation_name (str): Name of the simulation directory.
+    """
     if not os.path.isdir(simulation_name):
         print("creating folder: ", simulation_name)
         os.mkdir(simulation_name)
@@ -125,13 +169,23 @@ def _ensure_simulation_directory(simulation_name):
         print(f"{simulation_name} folder already exists...data will be overwritten")
 
 def _validate_soliton_lengths(sims, n_sims):
-    """
-    Ensure per-simulation dark-soliton lists have one entry per simulation.
+    r"""
+    Ensure the per-simulation dark-soliton lists have one entry per simulation.
 
-    Dark solitons are configured per simulation (mirroring the vortex lists):
-    ``soliton_positions``/``soliton_widths``/``soliton_axes`` are required and
-    must have exactly ``n_sims`` entries; ``soliton_greyness`` and
-    ``soliton_imprint_time`` are optional but, when given, must match too.
+    Dark solitons are configured per simulation, mirroring the vortex lists:
+    ``soliton_positions``, ``soliton_widths`` and ``soliton_axes`` are required
+    and must have exactly ``n_sims`` entries, while ``soliton_greyness`` and
+    ``soliton_imprint_time`` are optional but, when given as lists, must match
+    too.
+
+    Args:
+        sims (dict): Full configuration dictionary.
+        n_sims (int): Expected number of simulations.
+
+    Raises:
+        ValueError: If a required list is missing, is not a list, or has the
+            wrong length; or if an optional list is given with the wrong
+            length.
     """
     for key in ("soliton_positions", "soliton_widths", "soliton_axes"):
         value = sims.get(key)
@@ -149,11 +203,17 @@ def _validate_soliton_lengths(sims, n_sims):
 
 
 def _dark_soliton_params_for_sim(sims, index):
-    """
-    Per-simulation dark-soliton parameters for simulation ``index``.
+    r"""
+    Slice out the dark-soliton parameters of one simulation.
 
-    Returns ``{}`` when dark solitons are disabled or simulation ``index`` has
-    no solitons (an empty position list for that simulation).
+    Args:
+        sims (dict): Full configuration dictionary.
+        index (int): Index of the simulation to slice.
+
+    Returns:
+        dict: The dark-soliton parameters for this simulation, or ``{}`` when
+        dark solitons are disabled or this simulation has none, i.e. its
+        position list is empty.
     """
     if not sims.get("dark_soliton", False):
         return {}
@@ -179,40 +239,35 @@ def _dark_soliton_params_for_sim(sims, index):
 
 
 def get_simulation_combinations(sims):
-    """
-    Create distinct simulations to be run based on configuration parameters.
-    
-    Generates simulation folders with appropriate names and assigns parameters
-    to each simulation based on whether repetitive imprinting is enabled.
-    
-    Parameters
-    ----------
-    sims : dict
-        Dictionary containing all simulation parameters including:
-        - imprint_every : list of int
-        - max_imprints : list of int
-        - vortex_charge : list
-        - imprinting_charge : list
-        - repetitive : int (0 or 1)
-        - vortex_position_x : list
-        - vortex_position_y : list
-        - vortex_excitation : various
-        - initial_imprint_time : list
-        - imprint_position_x : list
-        - imprint_position_y : list
-        - imprint_times : list of lists
-    
-    Returns
-    -------
-    list of list
-        Each inner list contains [folder_name, parameters_dict] where:
-        - folder_name : str, name of the simulation folder
-        - parameters_dict : dict, simulation parameters
-    
-    Raises
-    ------
-    AssertionError
-        If parameter list lengths are inconsistent or repetitive flag is invalid.
+    r"""
+    Create the distinct simulations to be run from the configuration
+    parameters.
+
+    Simulation folders are generated with names describing their contents, and
+    each simulation receives its own parameter dictionary. Which branch is
+    taken depends on the configuration: vortex excitation with repetitive
+    imprinting, vortex excitation without it, or a dark-soliton-only run. The
+    finite-temperature settings are shared across all combinations, whereas the
+    vortex and soliton settings are sliced per simulation.
+
+    Args:
+        sims (dict): All simulation parameters. The keys consulted here are
+            ``imprint_every`` (list[int]), ``max_imprints`` (list[int]),
+            ``vortex_charge`` (list), ``imprinting_charge`` (list),
+            ``repetitive`` (0 or 1), ``vortex_position_x`` and
+            ``vortex_position_y`` (lists), ``vortex_excitation``,
+            ``initial_imprint_time`` (list), ``imprint_position_x`` and
+            ``imprint_position_y`` (lists), ``imprint_times``
+            (list of lists), and the dark-soliton and finite-temperature keys.
+
+    Returns:
+        list[list]: One entry per simulation, ``[folder_name, parameters]``,
+        where ``folder_name`` is the name of the simulation folder and
+        ``parameters`` its parameter dictionary.
+
+    Raises:
+        ValueError: If a required key is missing, if ``repetitive`` is neither
+            0 nor 1, or if the parameter list lengths are inconsistent.
     """
 
     # Finite-temperature parameters — shared across all simulation combinations.
@@ -263,7 +318,7 @@ def get_simulation_combinations(sims):
 
         if repetitive is not None and repetitive not in (0, 1):
             raise ValueError("repetitive must be 0 or 1")
-    
+
         if repetitive:
             if len(max_imprints) < 1:
                 raise ValueError("max_imprints is not correct in configuration file")
@@ -271,7 +326,7 @@ def get_simulation_combinations(sims):
                 raise ValueError("charges and imprint_every have different number of values")
             if len(charges) != len(max_imprints):
                 raise ValueError("charges and max_imprints have different number of values")
-            
+
             parameters_repetitive = []
             for i in range(len(charges)):
                 sim_params_i = {
@@ -333,33 +388,32 @@ def get_simulation_combinations(sims):
 
 
 def _simulations_repetitive(parameters_list):
-    """
-    Create simulation folders for repetitive imprinting scenarios.
-    
-    Parameters
-    ----------
-    parameters_list : list of dict
-        List where each dictionary contains parameters for one simulation,
-        including vortex_charge, imprinting_charge, max_imprints, and imprint_times.
-    
-    Returns
-    -------
-    list of list
-        Each inner list contains [simulation_name, parameters] where:
-        - simulation_name : str, name of the simulation folder
-        - parameters : dict, simulation parameters
+    r"""
+    Create the simulation folders for repetitive imprinting scenarios.
+
+    The folder name records the number of vortices, the initial charges, the
+    imprinting charges and the imprint snapshots.
+
+    Args:
+        parameters_list (list[dict]): One dictionary per simulation,
+            containing at least ``vortex_charge``, ``imprinting_charge``,
+            ``max_imprints`` and ``imprint_times``.
+
+    Returns:
+        list[list]: One entry per simulation, ``[simulation_name,
+        parameters]``.
     """
     simulations = []
-    
+
     for parameters in parameters_list:
         charges = parameters["vortex_charge"]
         imprinting_charge = parameters["imprinting_charge"]
-        
+
         if isinstance(charges, list):
             number_charges = len(charges)
         else:
             number_charges = 1
-        
+
         charges_str = _format_name_component(charges)
         imprinting_charge_str = _format_name_component(imprinting_charge)
         imprint_times = _format_name_component(parameters["imprint_times"])
@@ -369,31 +423,30 @@ def _simulations_repetitive(parameters_list):
             f'imprintCharge{imprinting_charge_str}__snapshots{imprint_times}'
         )
         simulations.append([simulation_name, parameters])
-        
+
         _ensure_simulation_directory(simulation_name)
-    
+
     return simulations
 
 
 def _simulations_multi_vortex(parameters_list):
-    """
-    Create simulation folders for multi-vortex scenarios.
-    
-    Parameters
-    ----------
-    parameters_list : list of dict
-        List where each dictionary contains parameters for one simulation,
-        including vortex_charge and vortex positions (x, y).
-    
-    Returns
-    -------
-    list of list
-        Each inner list contains [simulation_name, parameters] where:
-        - simulation_name : str, name of the simulation folder
-        - parameters : dict, simulation parameters
+    r"""
+    Create the simulation folders for multi-vortex scenarios.
+
+    The folder name records the number of vortices, their charges and their
+    :math:`x` and :math:`y` positions.
+
+    Args:
+        parameters_list (list[dict]): One dictionary per simulation,
+            containing at least ``vortex_charge``, ``vortex_position_x`` and
+            ``vortex_position_y``.
+
+    Returns:
+        list[list]: One entry per simulation, ``[simulation_name,
+        parameters]``.
     """
     simulations = []
-    
+
     for parameters in parameters_list:
         charges = parameters["vortex_charge"]
         all_charges = _format_name_component(charges)
@@ -403,32 +456,33 @@ def _simulations_multi_vortex(parameters_list):
 
         vortex_position_y = parameters["vortex_position_y"]
         vortex_position_y_str = _format_name_component(vortex_position_y)
-        
+
         simulation_name = (
             f"{len(charges)}vortex_charges{all_charges}__"
             f"x-{vortex_position_x_str}__y-{vortex_position_y_str}"
         )
         simulations.append([simulation_name, parameters])
-        
+
         _ensure_simulation_directory(simulation_name)
-    
+
     return simulations
 
 
 def _simulations_dark_soliton(parameters_list):
-    """
-    Build dark-soliton-only simulations (no vortex excitation), one per entry.
+    r"""
+    Build the dark-soliton-only simulations, one per entry.
 
-    Parameters
-    ----------
-    parameters_list : list of dict
-        One dict per simulation, each carrying that simulation's dark-soliton
-        settings (and finite-temperature settings) with ``vortex_excitation`` 0.
+    These runs have no vortex excitation; the folder name records the soliton
+    positions, their axes and the imprint snapshot.
 
-    Returns
-    -------
-    list of list
-        ``[[simulation_name, parameters], ...]`` — one entry per simulation.
+    Args:
+        parameters_list (list[dict]): One dictionary per simulation, each
+            carrying that simulation's dark-soliton settings and the
+            finite-temperature settings, with ``vortex_excitation`` set to 0.
+
+    Returns:
+        list[list]: One entry per simulation, ``[simulation_name,
+        parameters]``.
     """
     simulations = []
     for parameters in parameters_list:
@@ -442,25 +496,34 @@ def _simulations_dark_soliton(parameters_list):
 
 
 def save_parameters_to_json(parameters, filepath="simulation_parameters.json"):
-    """
-    Save simulation parameters to a JSON file.
-    
-    This function is expected to be called for each simulation, saving a JSON
-    file in each simulation folder.
-    
-    Parameters
-    ----------
-    parameters : dict
-        Dictionary containing simulation parameters to save.
-    filepath : str, optional
-        Path to the output JSON file, by default "simulation_parameters.json".
+    r"""
+    Save the simulation parameters to a JSON file.
+
+    This is expected to be called once per simulation, writing a JSON file in
+    each simulation folder. NumPy arrays are converted to lists on the way out.
+
+    Args:
+        parameters (dict): Simulation parameters to save.
+        filepath (str): Path of the output JSON file, by default
+            ``"simulation_parameters.json"``.
     """
     def convert(x):
-        """Convert numpy arrays to lists for JSON serialization."""
+        r"""
+        Convert NumPy arrays to lists for JSON serialisation.
+
+        Args:
+            x: Object the JSON encoder could not serialise.
+
+        Returns:
+            list: ``x`` as a list, when it exposes ``tolist``.
+
+        Raises:
+            TypeError: If ``x`` cannot be converted.
+        """
         if hasattr(x, "tolist"):  # numpy arrays have this
             return x.tolist()
         raise TypeError(x)
-    
+
     with open(filepath, "w") as fp:
         json.dump(parameters, fp, indent=4, default=convert)
 
@@ -470,26 +533,21 @@ def save_parameters_to_json(parameters, filepath="simulation_parameters.json"):
 # =============================================================================
 
 def _perform_reimprint_checks(simulation_params):
-    """
-    Validate re-imprinting parameters.
+    r"""
+    Validate the re-imprinting parameters.
 
-    Checks that:
-    - Number of imprint times matches number of imprinting charges
-    - Number of initial charges matches imprinting charges
-    - Imprinting charge positions are specified correctly
-    - Maximum imprint time is within simulation bounds
+    The checks are that the number of imprint times matches the number of
+    imprinting charges, that the number of initial charges matches the
+    imprinting charges, that the imprinting charge positions are specified
+    correctly, and that the maximum imprint time lies within the simulation
+    bounds. Imprint times are given in snapshots.
 
-    Parameters
-    ----------
-    simulation_params : dict
-        Dictionary containing simulation parameters.
+    Args:
+        simulation_params (dict): Simulation parameters to validate.
 
-    Returns
-    -------
-    ok : bool
-        True if validation passes, False otherwise.
-    msg : str
-        Error message describing the issue, empty string if validation passes.
+    Returns:
+        tuple: ``(ok, msg)`` — ``ok`` is ``True`` when validation passes, and
+        ``msg`` describes the problem otherwise (an empty string on success).
     """
     snapshots = simulation_params["shots"]
 
@@ -518,26 +576,21 @@ def _perform_reimprint_checks(simulation_params):
     return True, ""
 
 def _perform_frequency_checks(simulation_params):
-    """
-    Validate trapping frequency parameters.
-    
-    Checks that all trapping frequencies are positive.
-    
-    Parameters
-    ----------
-    simulation_params : dict
-        Dictionary containing simulation parameters.
-    
-    Returns
-    -------
-    ok : bool
-        True if validation passes, False otherwise.
-    msg : str
-        Error message describing the issue, empty string if validation passes.
+    r"""
+    Validate the trapping frequency parameters.
+
+    All trapping frequencies are checked to be strictly positive.
+
+    Args:
+        simulation_params (dict): Simulation parameters to validate.
+
+    Returns:
+        tuple: ``(ok, msg)`` — ``ok`` is ``True`` when validation passes, and
+        ``msg`` describes the problem otherwise (an empty string on success).
     """
     for index, freq in enumerate(simulation_params["Trapping_frequencies"]):
         if freq <= 0:
             msg = f"Frequency {index + 1} is negative or zero. Frequencies are assumed positives."
             return False, msg
-    
+
     return True, ""

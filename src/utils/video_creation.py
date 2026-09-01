@@ -1,3 +1,15 @@
+r"""
+Video creation from the snapshot files written during a simulation.
+
+Each snapshot file holds one frame of column-density (``R-*-cd.dat``) or
+velocity (``V-*-cd.dat``) data. The functions here read those frames back,
+map them to an 8-bit colour image and write an MP4 at 10 frames per second.
+
+Cartesian data is already a rectangular :math:`(n_1, n_3)` image. Cylindrical
+data is stored on the polar grid :math:`(n_r, n_\varphi)` and is resampled onto
+a square Cartesian image first, so the condensate appears as a disk rather than
+as an unrolled strip.
+"""
 ##################################################################################
 ###################### CREATE VIDEO ##############################################
 ##################################################################################
@@ -7,15 +19,34 @@ from cv2 import VideoWriter, VideoWriter_fourcc
 
 
 def _polar_to_cartesian_map(n_r, n_phi, img_size):
-    """
-    Precompute nearest-neighbour lookup from Cartesian pixel grid to polar (r, φ) indices.
+    r"""
+    Precompute the nearest-neighbour lookup from a Cartesian pixel grid to
+    polar :math:`(r, \varphi)` indices.
 
-    The circular domain (r in [0, r_max]) is mapped onto a square image of side
-    img_size.  Pixels outside the unit disk are flagged.
+    The circular domain :math:`r \in [0, r_\mathrm{max}]` is mapped onto a
+    square image of side ``img_size``. Writing :math:`(x, y)` for the pixel
+    coordinates rescaled to :math:`[-1, 1]`, the lookup is
+
+    .. math::
+
+        i_r = \Bigl\lfloor n_r \sqrt{x^{2} + y^{2}} \Bigr\rfloor,
+        \qquad
+        i_\varphi = \Bigl\lfloor \frac{n_\varphi}{2\pi}
+            \bigl[\operatorname{atan2}(y, x) \bmod 2\pi\bigr] \Bigr\rfloor,
+
+    with both indices clipped to their valid range. Pixels beyond the disk
+    boundary, :math:`\sqrt{x^{2} + y^{2}} > 1`, are flagged instead of being
+    clipped into the data.
+
+    Args:
+        n_r (int): Number of radial grid points in the snapshot files.
+        n_phi (int): Number of azimuthal grid points in the snapshot files.
+        img_size (int): Side length of the square output image, in pixels.
 
     Returns:
-        i_r, i_phi : integer index arrays of shape (img_size, img_size).
-        outside    : boolean mask — True for pixels beyond the disk boundary.
+        tuple: ``(i_r, i_phi, outside)`` — the two integer index arrays of
+        shape ``(img_size, img_size)``, and a boolean mask that is ``True`` for
+        pixels beyond the disk boundary.
     """
     y_idx, x_idx = np.mgrid[0:img_size, 0:img_size]
     x = (x_idx - img_size / 2.0) / (img_size / 2.0)   # [-1, 1]
@@ -28,7 +59,37 @@ def _polar_to_cartesian_map(n_r, n_phi, img_size):
 
 
 def _colorise(data_2d):
-    """Apply the jet-like colour mapping used by create_video and return a BGR uint8 array."""
+    r"""
+    Apply the jet-like colour mapping used by :func:`create_video` and return a
+    BGR image.
+
+    The data is first shifted and rescaled to the full 8-bit range,
+
+    .. math::
+
+        I = \Bigl\lfloor \frac{255\,(d - \min d)}{\max (d - \min d)}
+            \Bigr\rfloor \in [0, 255],
+
+    and a flat frame (:math:`\max d = \min d`) maps to all zeros. The three
+    channels are then piecewise-linear functions of :math:`I`:
+
+    .. math::
+
+        R = \begin{cases} I, & I < 230 \\ 255, & \text{otherwise} \end{cases}
+        \qquad
+        G = \begin{cases} I, & I \le 127 \\ 255 - I, & \text{otherwise}
+            \end{cases}
+        \qquad
+        B = \begin{cases} 255 - I, & I > 40 \\ 0, & \text{otherwise}
+            \end{cases}
+
+    Args:
+        data_2d (numpy.ndarray): 2-D array of frame data.
+
+    Returns:
+        numpy.ndarray: BGR image of dtype ``uint8``, shape
+        ``data_2d.shape + (3,)``, in the channel order OpenCV expects.
+    """
     zeroed = data_2d - np.min(data_2d)
     max_val = np.max(zeroed)
     if max_val == 0:
@@ -44,6 +105,19 @@ def create_video(count,\
                  simulation_name,\
                  n1,n3
                  ):
+  r"""
+  Create a video from the Cartesian column-density snapshots.
+
+  The third column of each ``R-*-cd.dat`` file holds the column density
+  :math:`n(x, z)` on the :math:`(n_1, n_3)` grid; every frame is colour-mapped
+  and written to ``{simulation_name}_fps10_frame{count}.mp4``.
+
+  Args:
+      count (int): Total number of frames, i.e. of snapshot files to read.
+      simulation_name (str): Base name for the output file.
+      n1 (int): Number of grid points along x.
+      n3 (int): Number of grid points along z.
+  """
 
   FPS=10
   SimulationName = simulation_name + f'_fps{FPS}_frame{count}'
@@ -70,18 +144,22 @@ def create_video(count,\
 
 
 def create_video_cylindrical(count, simulation_name, n_r, n_phi, img_size=None):
-  """
-  Create a video from cylindrical snapshot files (r-φ column density).
+  r"""
+  Create a video from the cylindrical column-density snapshots.
 
-  The (n_r, n_phi) polar data is mapped to a square Cartesian image so the
-  condensate appears as a disk rather than an unrolled strip.
+  The :math:`(n_r, n_\varphi)` polar data of the ``R-*-cd.dat`` files is
+  resampled onto a square Cartesian image with
+  :func:`_polar_to_cartesian_map`, so the condensate appears as a disk rather
+  than as an unrolled strip. Pixels outside the disk are set to zero.
 
   Args:
-      count           : total number of frames.
-      simulation_name : base name for the output file.
-      n_r, n_phi      : grid point counts matching the snapshot files.
-      img_size        : side length of the square output image in pixels.
-                        Defaults to 2 * n_r.
+      count (int): Total number of frames.
+      simulation_name (str): Base name for the output file.
+      n_r (int): Number of radial grid points, matching the snapshot files.
+      n_phi (int): Number of azimuthal grid points, matching the snapshot
+          files.
+      img_size (int): Side length of the square output image in pixels.
+          Defaults to ``2 * n_r``.
   """
   if img_size is None:
       img_size = 2 * n_r
@@ -106,18 +184,24 @@ def create_video_cylindrical(count, simulation_name, n_r, n_phi, img_size=None):
 
 
 def create_velocity_video_cylindrical(count, simulation_name, n_r, n_phi, img_size=None):
-  """
-  Create a video from cylindrical velocity snapshot files (r-φ plane, |v| magnitude).
+  r"""
+  Create a video of the velocity magnitude from the cylindrical velocity
+  snapshots.
 
-  The velocity magnitude is stored in column index 4 of the ``V-*-cd.dat`` files
-  (format: r_μm, phi_rad, vr, v_phi, |v|).
+  The magnitude :math:`\lvert \mathbf{v} \rvert` is stored in column index 4 of
+  the ``V-*-cd.dat`` files, whose format is
+  ``r_μm, phi_rad, vr, v_phi, |v|``. As in
+  :func:`create_video_cylindrical`, the :math:`(r, \varphi)` plane is resampled
+  onto a square Cartesian image.
 
   Args:
-      count           : total number of frames.
-      simulation_name : base name for the output file.
-      n_r, n_phi      : grid point counts matching the snapshot files.
-      img_size        : side length of the square output image in pixels.
-                        Defaults to 2 * n_r.
+      count (int): Total number of frames.
+      simulation_name (str): Base name for the output file.
+      n_r (int): Number of radial grid points, matching the snapshot files.
+      n_phi (int): Number of azimuthal grid points, matching the snapshot
+          files.
+      img_size (int): Side length of the square output image in pixels.
+          Defaults to ``2 * n_r``.
   """
   if img_size is None:
       img_size = 2 * n_r
@@ -145,6 +229,19 @@ def create_velocity_video(count,\
                  simulation_name,\
                  n1,n3
                  ):
+  r"""
+  Create a video from the Cartesian velocity snapshots.
+
+  The third column of each ``V-*-cd.dat`` file holds the velocity magnitude on
+  the :math:`(n_1, n_3)` plane; every frame is colour-mapped and written to
+  ``{simulation_name}_fps10_frame{count}_velocity.mp4``.
+
+  Args:
+      count (int): Total number of frames, i.e. of snapshot files to read.
+      simulation_name (str): Base name for the output file.
+      n1 (int): Number of grid points along x.
+      n3 (int): Number of grid points along z.
+  """
 
   FPS=10
   SimulationName = simulation_name + f'_fps{FPS}_frame{count}'

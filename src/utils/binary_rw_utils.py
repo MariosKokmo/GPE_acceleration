@@ -1,43 +1,46 @@
-"""
-Binary read/write utilities backed by SnapshotWriter.
+r"""
+Binary read/write utilities backed by :class:`~src.utils.snapshot_writer.SnapshotWriter`.
 
-Drop-in replacement for ``read_write_utils`` that stores simulation data in a
-single binary file (PyTorch ``.pt`` or HDF5 ``.h5``) instead of many small
-text files.  All GPU→CPU transfers use pinned memory for non-blocking copies.
+This is a drop-in replacement for :mod:`~src.utils.read_write_utils` that
+stores simulation data in a single binary file (PyTorch ``.pt`` or HDF5
+``.h5``) instead of many small text files. All GPU-to-CPU transfers use pinned
+memory for non-blocking copies.
 
-Visualisation helpers (phase figures, RMS plots, cross-section plots) operate
-directly on tensors / the binary run file so no intermediate text is needed.
+The visualisation helpers operate directly on tensors or on the binary run
+file, so no intermediate text is needed for phase figures, RMS plots or
+cross-section plots.
 
-Usage -- Recording (inside the simulation loop)
-------------------------------------------------
->>> from src.utils import binary_rw_utils as brw
->>>
->>> # once, before the loop
->>> recorder = brw.SimulationRecorder(
-...     run_name="my_sim", n1=512, n2=16, n3=512,
-...     shots=150, a_ho=1.2e-6,
-...     x1=x1_tensor, x3=x3_tensor,
-... )
->>>
->>> # each snapshot
->>> recorder.record_snapshot(psi, t, rms, energy_dict, cross_line_row)
->>>
->>> # after the loop
->>> recorder.finalise()
+Example:
+    Recording, inside the simulation loop:
 
-Usage -- Reading back
----------------------
->>> reader = brw.SimulationReader("my_sim.pt")   # or .h5
->>> times      = reader.times()
->>> col_dens   = reader.column_density()          # (shots, n1, n3)
->>> rms_arr    = reader.rms()
->>> energies   = reader.energies()                # (shots, 4)
->>> psi_real   = reader.psi_real()                # if stored
+    >>> from src.utils import binary_rw_utils as brw
+    >>>
+    >>> # once, before the loop
+    >>> recorder = brw.SimulationRecorder(
+    ...     run_name="my_sim", n1=512, n2=16, n3=512,
+    ...     shots=150, a_ho=1.2e-6,
+    ...     x1=x1_tensor, x3=x3_tensor,
+    ... )
+    >>>
+    >>> # each snapshot
+    >>> recorder.record_snapshot(psi, t, rms, energy_dict, cross_line_row)
+    >>>
+    >>> # after the loop
+    >>> recorder.finalise()
 
-Usage -- Visualisation (standalone, from binary file)
------------------------------------------------------
->>> brw.plot_rms_from_file("my_sim.pt")
->>> brw.plot_cross_section_from_file("my_sim.pt")
+    Reading back:
+
+    >>> reader = brw.SimulationReader("my_sim.pt")   # or .h5
+    >>> times      = reader.times()
+    >>> col_dens   = reader.column_density()          # (shots, n1, n3)
+    >>> rms_arr    = reader.rms()
+    >>> energies   = reader.energies()                # (shots, 4)
+    >>> psi_real   = reader.psi_real()                # if stored
+
+    Visualisation, standalone from the binary file:
+
+    >>> brw.plot_rms_from_file("my_sim.pt")
+    >>> brw.plot_cross_section_from_file("my_sim.pt")
 """
 
 import os
@@ -54,29 +57,33 @@ from src.utils.snapshot_writer import SnapshotWriter, _to_cpu
 # ============================================================================
 
 class SimulationRecorder:
-    """
-    Accumulates per-snapshot data via :class:`SnapshotWriter` and provides
-    the same observables that ``read_write_utils`` wrote to text files.
+    r"""
+    Accumulate per-snapshot data through
+    :class:`~src.utils.snapshot_writer.SnapshotWriter`.
 
-    Parameters
-    ----------
-    run_name : str
-        Base file name (extension chosen automatically).
-    n1, n2, n3 : int
-        Grid dimensions.
-    shots : int
-        Expected number of snapshots.
-    a_ho : float
-        Harmonic-oscillator length (used for unit conversion when reading).
-    x1, x3 : torch.Tensor
-        1-D spatial axes (dimensionless).  Stored in metadata so that
-        readers can reconstruct physical coordinates.
-    backend : str
-        ``"auto"`` | ``"torch"`` | ``"hdf5"`` (see :class:`SnapshotWriter`).
-    store_full_psi : bool
-        If *True*, the full complex wavefunction is saved every snapshot.
-    metadata : dict, optional
-        Extra metadata to embed (grid params, frequencies, …).
+    It provides the same observables that :mod:`~src.utils.read_write_utils`
+    wrote to text files, but keeps them in one binary run file.
+
+    Args:
+        run_name (str): Base file name; the extension is chosen automatically
+            by the backend.
+        n1 (int): Number of grid points along the first axis.
+        n2 (int): Number of grid points along the second axis.
+        n3 (int): Number of grid points along the third axis.
+        shots (int): Expected number of snapshots.
+        a_ho (float): Harmonic-oscillator length, used for the unit conversion
+            when reading back.
+        x1 (torch.Tensor): 1-D spatial axis along :math:`x`, in dimensionless
+            units. Stored in the metadata so that readers can reconstruct the
+            physical coordinates.
+        x3 (torch.Tensor): 1-D spatial axis along :math:`z`, stored the same
+            way.
+        backend (str): ``"auto"``, ``"torch"`` or ``"hdf5"``; see
+            :class:`~src.utils.snapshot_writer.SnapshotWriter`.
+        store_full_psi (bool): If ``True``, the full complex wavefunction is
+            saved every snapshot.
+        metadata (dict): Extra metadata to embed, such as the grid parameters
+            and the trap frequencies.
     """
 
     def __init__(
@@ -115,6 +122,7 @@ class SimulationRecorder:
 
     @property
     def filepath(self) -> str:
+        r"""str: Path of the run file being written."""
         return self._writer.filepath
 
     def record_snapshot(
@@ -125,23 +133,28 @@ class SimulationRecorder:
         energy: Dict[str, float],
         cross_section: torch.Tensor,
     ):
-        """
-        Record a single snapshot.  Column density is computed here so the
-        caller does not have to.
+        r"""
+        Record a single snapshot.
 
-        Parameters
-        ----------
-        psi : torch.Tensor, complex (n1, n2, n3)
-        t : float
-        rms : float
-        energy : dict  with keys ``e_kin``, ``e_pot``, ``e_int``, ``E_total``
-        cross_section : torch.Tensor (n1,)
+        The column density
+        :math:`n(x, z) = \sum_j \lvert \psi[i, j, k] \rvert^{2}` is computed
+        here, so the caller does not have to.
+
+        Args:
+            psi (torch.Tensor): Complex wavefunction of shape
+                ``(n1, n2, n3)``.
+            t (float): Current simulation time.
+            rms (float): RMS radius at this snapshot.
+            energy (dict): Energy breakdown, with the keys ``e_kin``,
+                ``e_pot``, ``e_int`` and ``E_total``.
+            cross_section (torch.Tensor): Cross-section line density, shape
+                ``(n1,)``.
         """
         column_density = torch.sum(torch.abs(psi) ** 2, dim=1)  # (n1, n3)
         self._writer.append(psi, t, column_density, rms, energy, cross_section)
 
     def finalise(self):
-        """Flush / close the underlying file."""
+        r"""Flush and close the underlying run file."""
         self._writer.finalise()
 
 
@@ -150,10 +163,19 @@ class SimulationRecorder:
 # ============================================================================
 
 class SimulationReader:
-    """
+    r"""
     Read a binary run file produced by :class:`SimulationRecorder`.
 
-    Accepts both ``.pt`` (torch) and ``.h5`` (HDF5) files.
+    Both ``.pt`` (torch) and ``.h5`` (HDF5) files are accepted; the backend is
+    chosen from the extension. A torch file is loaded eagerly into memory,
+    while an HDF5 file stays open until :meth:`close` is called.
+
+    Args:
+        path (str): Path of the run file to read.
+
+    Raises:
+        ValueError: If the file extension is neither ``.pt`` nor ``.h5`` /
+            ``.hdf5``.
     """
 
     def __init__(self, path: str):
@@ -170,38 +192,77 @@ class SimulationReader:
             raise ValueError(f"Unsupported file extension: {ext}")
 
     def close(self):
+        r"""Close the file, for the HDF5 backend; a no-op for torch files."""
         if self._backend == "hdf5":
             self._f.close()
 
     # --- field accessors ---------------------------------------------------
 
     def times(self) -> np.ndarray:
+        r"""
+        Return the snapshot timestamps.
+
+        Returns:
+            numpy.ndarray: Times of shape ``(shots,)``.
+        """
         if self._backend == "torch":
             return self._data["time"].numpy()
         return self._f["time"][:]
 
     def column_density(self) -> np.ndarray:
+        r"""
+        Return the column density of every snapshot.
+
+        Returns:
+            numpy.ndarray: Column densities of shape ``(shots, n1, n3)``.
+        """
         if self._backend == "torch":
             return self._data["column_density"].numpy()
         return self._f["density/column"][:]
 
     def rms(self) -> np.ndarray:
+        r"""
+        Return the RMS radius of every snapshot.
+
+        Returns:
+            numpy.ndarray: RMS radii of shape ``(shots,)``.
+        """
         if self._backend == "torch":
             return self._data["rms"].numpy()
         return self._f["observables/rms"][:]
 
     def energies(self) -> np.ndarray:
-        """Returns array of shape (shots, 4): [e_kin, e_pot, e_int, E_total]."""
+        r"""
+        Return the energy breakdown of every snapshot.
+
+        Returns:
+            numpy.ndarray: Energies of shape ``(shots, 4)``, the columns being
+            ``[e_kin, e_pot, e_int, E_total]``.
+        """
         if self._backend == "torch":
             return self._data["energy"].numpy()
         return self._f["observables/energy"][:]
 
     def cross_section(self) -> np.ndarray:
+        r"""
+        Return the cross-section line density of every snapshot.
+
+        Returns:
+            numpy.ndarray: Line densities of shape ``(shots, n1)``.
+        """
         if self._backend == "torch":
             return self._data["cross_section"].numpy()
         return self._f["cross_section"][:]
 
     def psi_real(self) -> Optional[np.ndarray]:
+        r"""
+        Return the real part of the stored wavefunction.
+
+        Returns:
+            numpy.ndarray or None: :math:`\operatorname{Re} \psi` of shape
+            ``(shots, n1, n2, n3)``, or ``None`` when the run did not store the
+            full wavefunction.
+        """
         if self._backend == "torch":
             t = self._data.get("psi_real")
             return t.numpy() if t is not None else None
@@ -210,6 +271,14 @@ class SimulationReader:
         return None
 
     def psi_imag(self) -> Optional[np.ndarray]:
+        r"""
+        Return the imaginary part of the stored wavefunction.
+
+        Returns:
+            numpy.ndarray or None: :math:`\operatorname{Im} \psi` of shape
+            ``(shots, n1, n2, n3)``, or ``None`` when the run did not store the
+            full wavefunction.
+        """
         if self._backend == "torch":
             t = self._data.get("psi_imag")
             return t.numpy() if t is not None else None
@@ -218,6 +287,13 @@ class SimulationReader:
         return None
 
     def metadata(self) -> dict:
+        r"""
+        Return the metadata embedded in the run file.
+
+        Returns:
+            dict: The simulation metadata, or an empty dict when the file
+            carries none.
+        """
         if self._backend == "torch":
             return self._data.get("metadata", {})
         meta = {}
@@ -232,7 +308,18 @@ class SimulationReader:
 # ============================================================================
 
 def save_figure_phase(phase: torch.Tensor, frame: int):
-    """Save a phase image (same behaviour as the original)."""
+    r"""
+    Save an image of the phase at the :math:`y` midplane.
+
+    The behaviour matches
+    :func:`~src.utils.read_write_utils.save_figure_phase`, except that the
+    figure is closed afterwards.
+
+    Args:
+        phase (torch.Tensor): Phase array of shape ``(n1, n2, n3)``; a complex
+            array is reduced to its real part.
+        frame (int): Snapshot index used in the title and the file name.
+    """
     n1, n2, n3 = phase.shape
     slice_data = phase[:, n2 // 2, :]
     if phase.dtype == torch.cdouble:
@@ -248,7 +335,15 @@ def save_figure_phase(phase: torch.Tensor, frame: int):
 
 def plot_rms(rms_values: np.ndarray, times: Optional[np.ndarray] = None,
              title: str = "RMS", save_path: str = "RMS.png"):
-    """Plot RMS radius from arrays (no intermediate text file needed)."""
+    r"""
+    Plot the RMS radius from arrays, with no intermediate text file.
+
+    Args:
+        rms_values (numpy.ndarray): RMS radius per snapshot.
+        times (numpy.ndarray): Snapshot times. Defaults to the snapshot index.
+        title (str): Title of the figure.
+        save_path (str): Path of the PNG to write.
+    """
     plt.figure()
     x = times if times is not None else np.arange(len(rms_values))
     plt.plot(x, rms_values)
@@ -260,7 +355,13 @@ def plot_rms(rms_values: np.ndarray, times: Optional[np.ndarray] = None,
 
 
 def plot_rms_from_file(run_file: str, save_path: str = "RMS.png"):
-    """Read a binary run file and plot RMS."""
+    r"""
+    Read a binary run file and plot the RMS radius.
+
+    Args:
+        run_file (str): Path of the ``.pt`` or ``.h5`` run file.
+        save_path (str): Path of the PNG to write.
+    """
     reader = SimulationReader(run_file)
     plot_rms(reader.rms(), reader.times(), save_path=save_path)
     reader.close()
@@ -268,7 +369,14 @@ def plot_rms_from_file(run_file: str, save_path: str = "RMS.png"):
 
 def plot_cross_section(cross_line_data: np.ndarray,
                        save_path: str = "cross_section_line.png"):
-    """3-D cross-section line-density plot from an array."""
+    r"""
+    Save a 3-D waterfall plot of the cross-section line density.
+
+    Args:
+        cross_line_data (numpy.ndarray): Line densities of shape
+            ``(shots, dim)``, one row per snapshot.
+        save_path (str): Path of the PNG to write.
+    """
     shots, dim = cross_line_data.shape
     ax = plt.figure(figsize=(12, 16)).add_subplot(projection="3d")
     y = np.arange(dim)
@@ -284,7 +392,13 @@ def plot_cross_section(cross_line_data: np.ndarray,
 
 def plot_cross_section_from_file(run_file: str,
                                  save_path: str = "cross_section_line.png"):
-    """Read a binary run file and plot cross-section."""
+    r"""
+    Read a binary run file and plot the cross-section line density.
+
+    Args:
+        run_file (str): Path of the ``.pt`` or ``.h5`` run file.
+        save_path (str): Path of the PNG to write.
+    """
     reader = SimulationReader(run_file)
     plot_cross_section(reader.cross_section(), save_path=save_path)
     reader.close()
@@ -292,7 +406,17 @@ def plot_cross_section_from_file(run_file: str,
 
 def plot_energies(energies: np.ndarray, times: Optional[np.ndarray] = None,
                   save_path: str = "energies.png"):
-    """Plot energy breakdown from a (shots, 4) array."""
+    r"""
+    Plot the energy breakdown from a ``(shots, 4)`` array.
+
+    One curve is drawn per column, labelled ``E_kin``, ``E_pot``, ``E_int`` and
+    ``E_total``.
+
+    Args:
+        energies (numpy.ndarray): Energies of shape ``(shots, 4)``.
+        times (numpy.ndarray): Snapshot times. Defaults to the snapshot index.
+        save_path (str): Path of the PNG to write.
+    """
     plt.figure()
     x = times if times is not None else np.arange(energies.shape[0])
     labels = ["E_kin", "E_pot", "E_int", "E_total"]
@@ -306,7 +430,13 @@ def plot_energies(energies: np.ndarray, times: Optional[np.ndarray] = None,
 
 
 def plot_energies_from_file(run_file: str, save_path: str = "energies.png"):
-    """Read a binary run file and plot energy breakdown."""
+    r"""
+    Read a binary run file and plot the energy breakdown.
+
+    Args:
+        run_file (str): Path of the ``.pt`` or ``.h5`` run file.
+        save_path (str): Path of the PNG to write.
+    """
     reader = SimulationReader(run_file)
     plot_energies(reader.energies(), reader.times(), save_path=save_path)
     reader.close()
@@ -319,7 +449,15 @@ def plot_energies_from_file(run_file: str, save_path: str = "energies.png"):
 # a drop-in when only swapping the import.  They delegate to the helpers above.
 
 def write_rms(rms_meas: dict, simulation_name: str):
-    """Write RMS measurements to a text file (legacy-compatible)."""
+    r"""
+    Write the RMS measurements to a text file (legacy-compatible).
+
+    Args:
+        rms_meas (dict): RMS radius per snapshot, keyed by time or snapshot
+            index.
+        simulation_name (str): Base name of the simulation, used for the file
+            name.
+    """
     with open(f"{simulation_name}_RMS_meas.txt", "w") as f:
         f.write("t\tr\n")
         for t, r in rms_meas.items():
@@ -327,7 +465,13 @@ def write_rms(rms_meas: dict, simulation_name: str):
 
 
 def save_rms_figure(title: str):
-    """Read a tab-delimited RMS text file and save a plot (legacy-compatible)."""
+    r"""
+    Read a tab-delimited RMS text file and save a plot (legacy-compatible).
+
+    Args:
+        title (str): Path of the file to read; its stem is reused for the title
+            and the output file name.
+    """
     data = np.loadtxt(title, skiprows=1, delimiter="\t")
     plt.figure()
     plt.plot(data[:, 0], data[:, 1])
@@ -339,19 +483,40 @@ def save_rms_figure(title: str):
 
 
 def save_cross_section_line_figure(cross_line_data: torch.Tensor):
-    """3-D cross-section plot from a tensor (legacy-compatible)."""
+    r"""
+    Save a 3-D cross-section plot from a tensor (legacy-compatible).
+
+    Args:
+        cross_line_data (torch.Tensor): Line densities of shape
+            ``(shots, dim)``; it must live on the CPU.
+    """
     plot_cross_section(cross_line_data.numpy())
 
 
 def save_tensor_to_csv(tensor: torch.Tensor, filename: str):
-    """Save a tensor to CSV (legacy-compatible)."""
+    r"""
+    Save a tensor to CSV, without an index or a header (legacy-compatible).
+
+    Args:
+        tensor (torch.Tensor): Tensor to save; it must live on the CPU.
+        filename (str): Destination path.
+    """
     import pandas as pd
     df = pd.DataFrame(tensor.numpy())
     df.to_csv(filename, index=False, header=None)
 
 
 def write_energy_terms(energies: list, filename: str):
-    """Write energy terms to a text file (legacy-compatible)."""
+    r"""
+    Write the energy terms to a text file (legacy-compatible).
+
+    One row per snapshot, ``e_kin,e_pot,e_int,E_total``.
+
+    Args:
+        energies (list[dict]): One dictionary per snapshot, with the keys
+            ``e_kin``, ``e_pot``, ``e_int`` and ``E_total``.
+        filename (str): Destination path.
+    """
     with open(filename, "w") as f:
         for energy in energies:
             f.write(

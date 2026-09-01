@@ -1,31 +1,52 @@
-"""
-ZNGBEC: Zaremba-Nikuni-Griffin finite-temperature BEC model.
+r"""
+Zaremba-Nikuni-Griffin (ZNG) finite-temperature BEC model.
 
-Inherits all ground-state finding, I/O, snapshotting, and split-step
-machinery from BaseBEC.  Overrides only _initialize_custom_parameters()
-and _main_simulation_loop() to implement the two-component ZNG dynamics.
+:class:`ZNGBEC` inherits all ground-state finding, I/O, snapshotting and
+split-step machinery from :class:`BaseBEC`. It overrides only
+:meth:`ZNGBEC._initialize_custom_parameters` and
+:meth:`ZNGBEC._main_simulation_loop` to implement the two-component ZNG
+dynamics.
 
-Condensate + Thermal cloud equations (dimensionless, ħ = m = ω_ho = 1):
----------------------------------------------------------------------------
+In dimensionless units (:math:`\hbar = m = \omega_\mathrm{ho} = 1`) the
+condensate obeys the modified GPE
 
-Condensate (modified GPE):
-    i ∂ψ/∂t = [H_GP + i R(r,t)/2] ψ
-    H_GP = −∇²/2 + V_ext + u(n_c + 2ñ)
-    R(r) = 2 γ_12 [μ − V_eff(r)]          (condensate source/sink rate)
-    V_eff = V_ext + 2u(n_c + ñ)            (full mean-field for thermal atoms)
+.. math::
 
-Thermal cloud (classical test particles):
-    dr_i/dt = p_i
-    dp_i/dt = −∇U(r_i)
-    U(r) = V_ext + 2u(n_c + ñ)            (= V_eff above)
+    i \frac{\partial \psi}{\partial t}
+        &= \Bigl[\, H_\mathrm{GP}
+                 + \tfrac{i}{2} R(\mathbf{r}, t) \,\Bigr] \psi, \\
+    H_\mathrm{GP}
+        &= -\tfrac{1}{2} \nabla^{2} + V_\mathrm{ext}
+           + u \bigl(n_c + 2 \tilde{n}\bigr), \\
+    R(\mathbf{r})
+        &= 2 \gamma_{12} \bigl[\, \mu - V_\mathrm{eff}(\mathbf{r}) \,\bigr],
+        \qquad
+    V_\mathrm{eff} = V_\mathrm{ext} + 2u \bigl(n_c + \tilde{n}\bigr),
 
-The two equations are coupled via the densities n_c = |ψ|² and ñ(r)
-(deposited from the test-particle positions onto the grid).
+where :math:`R` is the condensate source/sink rate and
+:math:`V_\mathrm{eff}` the full mean field seen by thermal atoms. The thermal
+cloud is represented by classical test particles obeying
+
+.. math::
+
+    \frac{\mathrm{d}\mathbf{r}_i}{\mathrm{d}t} = \mathbf{p}_i,
+    \qquad
+    \frac{\mathrm{d}\mathbf{p}_i}{\mathrm{d}t} = -\nabla U(\mathbf{r}_i),
+    \qquad
+    U = V_\mathrm{ext} + 2u \bigl(n_c + \tilde{n}\bigr) = V_\mathrm{eff}.
+
+The two equations are coupled through the densities
+:math:`n_c = \lvert \psi \rvert^{2}` and :math:`\tilde{n}(\mathbf{r})`, the
+latter deposited from the test-particle positions onto the grid.
 
 References:
-    E. Zaremba, T. Nikuni, A. Griffin, J. Low Temp. Phys. 116, 277 (1999).
-    T. Nikuni, E. Zaremba, A. Griffin, PRL 83, 10 (1999).
-    S. Gardiner, D. Jaksch, R. Dum, J. Cirac, P. Zoller, PRA 62, 023612 (2000).
+    E. Zaremba, T. Nikuni and A. Griffin, *J. Low Temp. Phys.* **116**, 277
+    (1999).
+
+    T. Nikuni, E. Zaremba and A. Griffin, *Phys. Rev. Lett.* **83**, 10 (1999).
+
+    S. Gardiner, D. Jaksch, R. Dum, J. Cirac and P. Zoller, *Phys. Rev. A*
+    **62**, 023612 (2000).
 """
 
 import torch
@@ -51,40 +72,46 @@ from src.experimental.zng.monte_carlo import (
 
 
 class ZNGBEC(BaseBEC):
-    """
+    r"""
     Finite-temperature BEC simulation using the full Zaremba-Nikuni-Griffin
     (ZNG) two-component framework.
 
-    State
-    -----
-    self.psi                  : condensate wavefunction ψ(r), (n1,n2,n3) cdouble
-    self.particle_positions   : thermal test-particle positions,  (N_test, 3)
-    self.particle_momenta     : thermal test-particle momenta,    (N_test, 3)
-    self.n_tilde              : thermal density ñ(r) on the grid, (n1,n2,n3)
+    The following keys are read from the simulation parameters (dict or JSON):
 
-    Configuration parameters (add to simulation parameters dict or JSON)
-    ----------------------------------------------------------------------
-    temperature : float
-        Dimensionless temperature k_B T / (ħ ω_ho).
-        Must be > 0 (use FiniteTempBEC / SGPE for T→0 limit).
-
-    n_test_particles : int  (default 10000)
+    ``temperature`` (float)
+        Dimensionless temperature :math:`k_B T / (\hbar \omega_\mathrm{ho})`.
+        Must be positive; use ``FiniteTempBEC`` / SGPE for the
+        :math:`T \to 0` limit.
+    ``n_test_particles`` (int, default 10000)
         Number of Monte Carlo test particles representing the thermal cloud.
-        Larger N_test → smoother ñ(r), less shot noise, more compute.
-        Rule of thumb: N_test ≥ 10 × (n1 × n2 × n3)^(1/3) × 10.
+        A larger :math:`N_\mathrm{test}` gives a smoother
+        :math:`\tilde{n}(\mathbf{r})` with less shot noise, at more compute.
+    ``gamma_12`` (float, default 0.1)
+        Dimensionless :math:`C_{12}` coupling rate :math:`\gamma_{12}` between
+        condensate and thermal cloud. It controls how fast atoms are exchanged
+        between the two components; :math:`\gamma_{12} = 0` decouples them
+        entirely.
+    ``chemical_potential`` (float or None, default None)
+        Reservoir chemical potential :math:`\mu`, in units of
+        :math:`\hbar \omega_\mathrm{ho}`. If ``None``, it is computed once from
+        the initial ground-state wavefunction.
+    ``enable_c22`` (bool, default False)
+        Whether to apply :math:`C_{22}` (thermal-thermal) collisions.
+        Currently a no-op stub; set it to ``True`` once a real :math:`C_{22}`
+        is implemented.
 
-    gamma_12 : float  (default 0.1)
-        Dimensionless C_12 coupling rate between condensate and thermal cloud.
-        Controls how fast atoms exchange between the two components.
-        γ_12 = 0 decouples condensate and thermal cloud entirely.
+    See :meth:`_initialize_custom_parameters` for the remaining ZNG-specific
+    keys.
 
-    chemical_potential : float or None  (default None)
-        Reservoir chemical potential μ (ħ ω_ho units).
-        If None, computed once from the initial ground-state wavefunction.
-
-    enable_c22 : bool  (default False)
-        Whether to apply C_22 (thermal–thermal) collisions.
-        Currently a no-op stub; set True when a real C_22 is implemented.
+    Attributes:
+        psi (torch.Tensor): Condensate wavefunction :math:`\psi(\mathbf{r})`,
+            shape ``(n1, n2, n3)``, ``cdouble``.
+        particle_positions (torch.Tensor): Thermal test-particle positions,
+            shape ``(N_test, 3)``.
+        particle_momenta (torch.Tensor): Thermal test-particle momenta, shape
+            ``(N_test, 3)``.
+        n_tilde (torch.Tensor): Thermal density :math:`\tilde{n}(\mathbf{r})`
+            on the grid, shape ``(n1, n2, n3)``.
     """
 
     # ------------------------------------------------------------------
@@ -92,46 +119,50 @@ class ZNGBEC(BaseBEC):
     # ------------------------------------------------------------------
 
     def _initialize_custom_parameters(self) -> None:
-        """
-        Read ZNG-specific parameters and allocate the thermal cloud arrays.
+        r"""
+        Read the ZNG-specific parameters and allocate the thermal cloud arrays.
 
-        temperature : float
-            k_B T / (ħ ω_ho) — controls thermal cloud width and noise.
-
-        n_test_particles : int
-            N_test — number of test particles for the Monte Carlo thermal cloud.
-            More particles → smoother ñ but slower per step.
-
-        gamma_12 : float
-            Phenomenological C_12 rate.  Drives atom exchange between condensate
-            and thermal cloud on the timescale 1/γ_12.
-
-        chemical_potential : float or None
-            If not provided, μ is computed from the T=0 ground state as
-            μ = e_kin + e_pot + 2·e_int and held fixed throughout.
-
-        enable_c22 : bool
-            Placeholder flag.  C_22 is the thermal–thermal Boltzmann collision
-            integral; it thermalises the distribution further but is expensive.
-
-        zng_condensate_exchange : bool  (default False)
+        ``temperature`` (float)
+            :math:`k_B T / (\hbar \omega_\mathrm{ho})`, which controls the
+            thermal cloud width and its noise.
+        ``n_test_particles`` (int)
+            :math:`N_\mathrm{test}`, the number of test particles for the Monte
+            Carlo thermal cloud. More particles give a smoother
+            :math:`\tilde{n}` but a slower step.
+        ``gamma_12`` (float)
+            Phenomenological :math:`C_{12}` rate. It drives the atom exchange
+            between condensate and thermal cloud on the timescale
+            :math:`1 / \gamma_{12}`.
+        ``chemical_potential`` (float or None)
+            If not provided, :math:`\mu` is computed from the :math:`T = 0`
+            ground state as
+            :math:`\mu = E_\mathrm{kin} + E_\mathrm{pot} + 2 E_\mathrm{int}`
+            and held fixed throughout.
+        ``enable_c22`` (bool)
+            Placeholder flag. :math:`C_{22}` is the thermal-thermal Boltzmann
+            collision integral; it thermalises the distribution further but is
+            expensive.
+        ``zng_condensate_exchange`` (bool, default False)
             Whether the condensate is allowed to exchange atoms with the
             thermal cloud.
 
-            False — the condensate is renormalised after every split step, so
-            its atom number is pinned.  The source term R still reshapes the
-            condensate (R varies in space, so rescaling does not cancel it),
-            but no atoms actually leave or enter.  This is the behaviour the
-            model was originally written with, and it is the default so that
-            existing runs reproduce.
+            ``False`` — the condensate is renormalised after every split step,
+            so its atom number is pinned. The source term :math:`R` still
+            reshapes the condensate (:math:`R` varies in space, so rescaling
+            does not cancel it), but no atoms actually leave or enter. This is
+            the behaviour the model was originally written with, and it is the
+            default so that existing runs reproduce.
 
-            True — the norm is left free.  R then does what it is meant to do:
-            where R > 0 the condensate grows, where R < 0 it decays, and the
-            C_12 step moves the corresponding test particles the other way.
-            This is the physically consistent choice, since the C_12 collision
-            step already creates and destroys test particles; with the norm
-            pinned those transfers are one-sided and total atom number is not
-            conserved.
+            ``True`` — the norm is left free. :math:`R` then does what it is
+            meant to do: where :math:`R > 0` the condensate grows, where
+            :math:`R < 0` it decays, and the :math:`C_{12}` step moves the
+            corresponding test particles the other way. This is the physically
+            consistent choice, since the :math:`C_{12}` collision step already
+            creates and destroys test particles; with the norm pinned those
+            transfers are one-sided and total atom number is not conserved.
+
+        See :meth:`_resolve_thermal_fraction` for
+        ``zng_thermal_fraction_mode`` and ``zng_thermal_fraction``.
         """
         self.temperature: float = self.parameters.get("temperature", 1.0)
         self.n_test: int = int(self.parameters.get("n_test_particles", 10_000))
@@ -165,12 +196,14 @@ class ZNGBEC(BaseBEC):
         )
 
     def _initialise(self) -> None:
-        """
+        r"""
         Load the condensate ground state and initialise the thermal cloud.
 
-        Calls the parent _initialise() to find/read ψ₀ from disk, then
-        computes μ (if not supplied) and draws the initial test-particle
-        distribution from the semiclassical Boltzmann distribution.
+        The parent :meth:`BaseBEC._initialise` is called first to find or read
+        :math:`\psi_0` from disk. The sample is then split between the two
+        components, :math:`\mu` is computed (unless it was supplied), and the
+        initial test-particle distribution is drawn from the semiclassical
+        Boltzmann distribution.
         """
         # Load condensate ground state (ψ₀) via BaseBEC
         super()._initialise()
@@ -220,11 +253,13 @@ class ZNGBEC(BaseBEC):
     # ------------------------------------------------------------------
 
     def _update_thermal_density(self) -> None:
-        """
-        Deposit test-particle positions onto the grid to get ñ(r).
+        r"""
+        Deposit the test-particle positions onto the grid to get
+        :math:`\tilde{n}(\mathbf{r})`.
 
-        Called at the start of each time step so that the condensate GPE
-        and the particle equations of motion see a consistent ñ.
+        This is called at the start of each time step, so that the condensate
+        GPE and the particle equations of motion see a consistent
+        :math:`\tilde{n}`.
         """
         params = self.system.simulation_parameters
         n1, n2, n3 = params["Grid_resolution"]
@@ -241,41 +276,52 @@ class ZNGBEC(BaseBEC):
     THERMAL_FRACTION_MODES = ("temperature", "explicit")
 
     def _resolve_thermal_fraction(self) -> float:
-        """
+        r"""
         Work out what fraction of the atoms starts in the thermal cloud.
 
-        The condensate is normalised so that ∫|ψ|² dV = 1 stands for the whole
-        sample, so the thermal cloud has to be measured on the same scale: the
-        fraction returned here is what ∫ñ dV integrates to, and the condensate
-        is scaled to hold the remaining 1 − f. Without this both components are
-        in different units and every mean-field term that mixes them — and so
-        the C_12 exchange rate itself — scales with the test-particle count,
-        which is a convergence knob rather than physics.
+        The condensate is normalised so that
+        :math:`\int \lvert \psi \rvert^{2}\, \mathrm{d}V = 1` stands for the
+        whole sample, so the thermal cloud has to be measured on the same
+        scale: the fraction returned here is what
+        :math:`\int \tilde{n}\, \mathrm{d}V` integrates to, and the condensate
+        is scaled to hold the remaining :math:`1 - f`. Without this the two
+        components are in different units, and every mean-field term that mixes
+        them — and so the :math:`C_{12}` exchange rate itself — scales with the
+        test-particle count, which is a convergence knob rather than physics.
 
-        Two conventions, selected by ``zng_thermal_fraction_mode``:
+        There are two conventions, selected by
+        ``zng_thermal_fraction_mode``:
 
         ``"temperature"`` (default)
-            Derive f from the ideal-Bose result for a 3-D harmonic trap. With
-            k_B T_c = ħ ω_ho (N / ζ(3))^{1/3}, the condensed fraction below T_c
-            is 1 − (T/T_c)³, so
+            Derive :math:`f` from the ideal-Bose result for a 3-D harmonic
+            trap. With
+            :math:`k_B T_c = \hbar \omega_\mathrm{ho} (N / \zeta(3))^{1/3}`,
+            the condensed fraction below :math:`T_c` is
+            :math:`1 - (T / T_c)^{3}`, so
 
-                f = (T/T_c)³ = T³ ζ(3) / N        (capped at 1)
+            .. math::
 
-            using the dimensionless T = k_B T / (ħ ω_ho) already configured as
-            ``temperature`` and the atom number N from CONSTANTS. Above T_c the
-            whole sample is thermal and f saturates at 1.
+                f = \Bigl(\frac{T}{T_c}\Bigr)^{3}
+                  = \frac{T^{3} \zeta(3)}{N},
 
+            capped at 1, using the dimensionless
+            :math:`T = k_B T / (\hbar \omega_\mathrm{ho})` already configured
+            as ``temperature`` and the atom number :math:`N` from
+            ``CONSTANTS``. Above :math:`T_c` the whole sample is thermal and
+            :math:`f` saturates at 1.
         ``"explicit"``
-            Take f straight from ``zng_thermal_fraction``. Use this when the
-            trap is not harmonic, when you are matching a measured condensate
-            fraction, or when you want to sweep f independently of T.
+            Take :math:`f` straight from ``zng_thermal_fraction``. Use this
+            when the trap is not harmonic, when you are matching a measured
+            condensate fraction, or when you want to sweep :math:`f`
+            independently of :math:`T`.
 
         Returns:
-            float: thermal fraction in [0, 1].
+            float: The thermal fraction :math:`f \in [0, 1]`.
 
         Raises:
-            ValueError: on an unknown mode, or a missing/out-of-range explicit
-                fraction.
+            ValueError: If the mode is unknown, if the explicit fraction is
+                missing or out of range, or if ``CONSTANTS.nat`` is not
+                positive.
         """
         mode = self.thermal_fraction_mode
         if mode not in self.THERMAL_FRACTION_MODES:
@@ -306,13 +352,19 @@ class ZNGBEC(BaseBEC):
         return min(1.0, float(self.temperature) ** 3 * zeta_3 / n_atoms)
 
     def _reconcile_condensate(self, target_number: float) -> None:
-        """
-        Rescale ψ so the condensate holds exactly ``target_number`` atoms.
+        r"""
+        Rescale :math:`\psi` so the condensate holds exactly ``target_number``
+        atoms.
 
-        A uniform factor, so whatever shape the source term R imposed during
-        the step is untouched — only the total is set. Called with the number
-        C_12 actually transferred, which is what closes the particle budget
-        between the two components.
+        The factor is uniform, so whatever shape the source term :math:`R`
+        imposed during the step is untouched and only the total is set. This is
+        called with the number :math:`C_{12}` actually transferred, which is
+        what closes the particle budget between the two components.
+
+        Args:
+            target_number (float): Condensate atom number to rescale to, in the
+                condensate's own normalisation. Non-positive values are
+                ignored.
         """
         if self.psi is None or target_number <= 0.0:
             return
@@ -321,20 +373,33 @@ class ZNGBEC(BaseBEC):
             self.psi = self.psi * ((target_number / current) ** 0.5)
 
     def condensate_number(self) -> float:
-        """
-        Condensate atom number as a fraction of its initial value, ∫|ψ|² dV.
+        r"""
+        Return the condensate atom number as a fraction of its initial value,
+        :math:`\int \lvert \psi \rvert^{2}\, \mathrm{d}V`.
 
-        Exactly 1 while ``zng_condensate_exchange`` is off, since the state is
-        renormalised every step. With exchange on it moves, and watching it
-        against the test-particle count is how you check that what the
-        condensate loses the cloud gains.
+        This is exactly 1 while ``zng_condensate_exchange`` is off, since the
+        state is renormalised every step. With exchange on it moves, and
+        watching it against the test-particle count is how you check that what
+        the condensate loses the cloud gains.
+
+        Returns:
+            float: The condensate norm, or ``0.0`` if :math:`\psi` has not been
+            initialised.
         """
         if self.psi is None:
             return 0.0
         return float(self.d_x * torch.sum(torch.abs(self.psi) ** 2))
 
     def _get_grid_arrays(self):
-        """Return x_min and dx as device tensors (avoids repeating conversion)."""
+        r"""
+        Return ``x_min`` and ``dx`` as device tensors.
+
+        This avoids repeating the conversion at every use site.
+
+        Returns:
+            tuple: The pair ``(x_min, dx)``, each a ``torch.Tensor`` of shape
+            ``(3,)`` on the simulation device.
+        """
         params = self.system.simulation_parameters
         x_min = torch.tensor(params["x_min"], dtype=torch.float64, device=self.device)
         dx = torch.tensor(params["dx"], dtype=torch.float64, device=self.device)
@@ -345,44 +410,62 @@ class ZNGBEC(BaseBEC):
     # ------------------------------------------------------------------
 
     def _main_simulation_loop(self) -> None:
-        """
-        ZNG coupled time-evolution loop.
+        r"""
+        Run the ZNG coupled time-evolution loop.
 
         Each iteration couples the condensate and the thermal cloud through
-        their shared densities (n_c, ñ).  The sequence is:
+        their shared densities :math:`(n_c, \tilde{n})`. The sequence is:
 
-        1.  Compute condensate density: n_c = |ψ|²
-        2.  Deposit thermal cloud → grid: ñ = CIC(particle positions)
-        3.  Build condensate GPE potential:
-                V_GP = V_ext + u(n_c + 2ñ)
-        4.  Build condensate source term (C_12 mean field):
-                R = 2 γ_12 [μ − V_eff],   V_eff = V_ext + 2u(n_c + ñ)
-        5.  Evolve condensate one step with modified GPE:
-                i ∂ψ/∂t = [H_GP + iR/2] ψ
-            using the split-step method with complex potential V_GP + iR/2.
-        6.  Compute thermal particle potential:
-                U = V_ext + 2u(n_c_new + ñ)
-        7.  Advance test particles by leapfrog under U.
-        8.  Apply C_12 stochastic collisions (absorption + emission).
-        9.  Apply C_22 (no-op stub unless enable_c22 is True).
-        10. Update ñ from new particle positions.
+        1. Compute the condensate density
+           :math:`n_c = \lvert \psi \rvert^{2}`.
+        2. Deposit the thermal cloud onto the grid,
+           :math:`\tilde{n} = \mathrm{CIC}(\text{particle positions})`.
+        3. Build the condensate GPE potential
+           :math:`V_\mathrm{GP} = V_\mathrm{ext} + u (n_c + 2 \tilde{n})`.
+        4. Build the condensate source term (the :math:`C_{12}` mean field)
+           :math:`R = 2 \gamma_{12} [\mu - V_\mathrm{eff}]`, with
+           :math:`V_\mathrm{eff} = V_\mathrm{ext} + 2u (n_c + \tilde{n})`.
+        5. Evolve the condensate one step with the modified GPE
+           :math:`i\, \partial_t \psi = [H_\mathrm{GP} + iR/2]\, \psi`, using
+           the split-step method with the complex potential
+           :math:`V_\mathrm{GP} + iR/2`.
+        6. Compute the thermal particle potential
+           :math:`U = V_\mathrm{ext} + 2u (n_c^\mathrm{new} + \tilde{n})`.
+        7. Advance the test particles by leapfrog under :math:`U`.
+        8. Apply the :math:`C_{12}` stochastic collisions (absorption and
+           emission), then reconcile the condensate against the transfer that
+           actually happened.
+        9. Apply :math:`C_{22}` (a no-op stub unless ``enable_c22`` is set).
+        10. Update :math:`\tilde{n}` from the new particle positions.
 
-        The condensate is re-normalised after the split step to enforce the
-        grand-canonical particle-number constraint (same as SGPE).
+        Note:
+            **Why the source term enters as** :math:`+iR/2`. The modified GPE
+            is written as
+            :math:`i\, \partial_t \psi = H_\mathrm{GP} \psi + i (R/2) \psi`;
+            multiplying through by :math:`-i` gives
 
-        Why the source term enters as +iR/2
-        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        The modified GPE is written as:
-            i ∂ψ/∂t = H_GP ψ + i(R/2) ψ
+            .. math::
 
-        Multiplying through by −i:
-            ∂ψ/∂t = −i H_GP ψ + (R/2) ψ
+                \frac{\partial \psi}{\partial t}
+                    = -i H_\mathrm{GP} \psi + \frac{R}{2} \psi .
 
-        The +R/2 (not −R/2) gives ∂|ψ|²/∂t = R|ψ|², so where R > 0 the
-        condensate density grows.  In the split-step, this is implemented by
-        passing a complex potential V_GP + iR/2 to the x-evolution operator:
-            exp(−i·dt·(V_GP + iR/2)) = exp(dt·R/2) · exp(−i·dt·V_GP)
-        The real exponential exp(dt·R/2) provides the growth/decay.
+            The :math:`+R/2` (rather than :math:`-R/2`) gives
+            :math:`\partial_t \lvert \psi \rvert^{2} = R \lvert \psi \rvert^{2}`,
+            so the condensate density grows where :math:`R > 0`. In the
+            split-step this is implemented by passing the complex potential
+            :math:`V_\mathrm{GP} + iR/2` to the real-space evolution operator,
+
+            .. math::
+
+                e^{-i \Delta t (V_\mathrm{GP} + iR/2)}
+                    = e^{\Delta t R / 2}\, e^{-i \Delta t V_\mathrm{GP}},
+
+            where the real exponential :math:`e^{\Delta t R / 2}` provides the
+            growth or decay.
+
+        Raises:
+            RuntimeError: If the condensate wavefunction has not been
+                initialised.
         """
         if self.psi is None:
             raise RuntimeError("BEC wavefunction (psi) is not initialized.")

@@ -1,23 +1,19 @@
-"""
+r"""
 GPU-friendly binary snapshot writer for BEC simulations.
 
-Replaces per-point text I/O with bulk binary writes.  Two backends are
-provided so no extra dependency is mandatory:
+This replaces per-point text I/O with bulk binary writes. Two backends are
+provided so that no extra dependency is mandatory:
 
-  1. **PyTorch backend** (always available) -- uses ``torch.save`` to write
-     ``.pt`` files.  One file per simulation run stores all snapshots.
-  2. **HDF5 backend** (requires ``h5py``) -- writes a single ``.h5`` file
-     with chunked, optionally compressed datasets.
+1. **PyTorch backend** (always available) — uses ``torch.save`` to write
+   ``.pt`` files. One file per simulation run stores all snapshots.
+2. **HDF5 backend** (requires ``h5py``) — writes a single ``.h5`` file with
+   chunked, optionally compressed datasets.
 
-Both backends support:
-  - Non-blocking GPU->CPU transfers (pinned memory + ``non_blocking=True``)
-  - Appending snapshots incrementally during the simulation loop
-  - Storing scalar observables (RMS, energies) alongside field data
+Both backends support non-blocking GPU-to-CPU transfers (pinned memory with
+``non_blocking=True``), appending snapshots incrementally during the simulation
+loop, and storing scalar observables (RMS, energies) alongside the field data.
 
-Schema (dataset layout inside the run file)
---------------------------------------------
-
-::
+The dataset layout inside a run file is::
 
   /metadata            -- grid, frequencies, potential, etc.
   /time                -- 1-D array of snapshot timestamps          (shots,)
@@ -29,13 +25,12 @@ Schema (dataset layout inside the run file)
   /observables/energy  -- energy breakdown per snapshot            (shots, 4)  [kin, pot, int, total]
   /cross_section       -- cross-section line density               (shots, n1)
 
-Usage
------
->>> writer = SnapshotWriter(run_name="my_sim", n1=512, n2=16, n3=512, shots=150)
->>> # inside loop:
->>> writer.append(psi, t, uext, rms, energy_dict, cross_line_row)
->>> # after loop:
->>> writer.finalise()
+Example:
+    >>> writer = SnapshotWriter(run_name="my_sim", n1=512, n2=16, n3=512, shots=150)
+    >>> # inside loop:
+    >>> writer.append(psi, t, uext, rms, energy_dict, cross_line_row)
+    >>> # after loop:
+    >>> writer.finalise()
 """
 
 import os
@@ -48,9 +43,17 @@ from typing import Dict, Optional
 # ---------------------------------------------------------------------------
 
 def _to_cpu(tensor: torch.Tensor) -> torch.Tensor:
-    """
-    Move a GPU tensor to CPU using pinned memory for async transfer.
-    If already on CPU, return as-is.
+    r"""
+    Move a GPU tensor to the CPU through pinned memory, for an async transfer.
+
+    Args:
+        tensor (torch.Tensor): Tensor to move; one already on the CPU is
+            returned as-is.
+
+    Returns:
+        torch.Tensor: The tensor on the CPU. The copy is issued as
+        non-blocking and the current CUDA stream is synchronised before
+        returning, so the result is safe to read immediately.
     """
     if not tensor.is_cuda:
         return tensor
@@ -68,7 +71,16 @@ def _to_cpu(tensor: torch.Tensor) -> torch.Tensor:
 # ---------------------------------------------------------------------------
 
 class _TorchBuffer:
-    """Accumulates snapshot data in CPU lists and writes a single .pt file."""
+    r"""
+    Accumulate snapshot data in CPU lists and write a single ``.pt`` file.
+
+    Nothing reaches the disk until :meth:`finalise` is called, so the whole run
+    is held in host memory. This is the fallback backend, used when ``h5py`` is
+    not installed.
+
+    Args:
+        path (str): Path of the ``.pt`` file to write.
+    """
 
     def __init__(self, path: str):
         self._path = path
@@ -83,9 +95,20 @@ class _TorchBuffer:
         self._store_full_psi = False
 
     def set_metadata(self, meta: dict):
+        r"""
+        Store the run metadata to be embedded in the output file.
+
+        Args:
+            meta (dict): Simulation metadata, such as the grid parameters and
+                the trap frequencies.
+        """
         self._metadata = meta
 
     def enable_full_psi(self):
+        r"""
+        Store the full complex wavefunction for every snapshot, as separate
+        real and imaginary arrays.
+        """
         self._store_full_psi = True
         self._data["psi_real"] = []
         self._data["psi_imag"] = []
@@ -99,6 +122,23 @@ class _TorchBuffer:
         energy: Dict[str, float],
         cross_section: torch.Tensor,
     ):
+        r"""
+        Buffer one snapshot in host memory.
+
+        Args:
+            psi (torch.Tensor): Complex wavefunction of shape
+                ``(n1, n2, n3)``; stored only when the full
+                :math:`\psi` has been enabled.
+            t (float): Current simulation time.
+            column_density (torch.Tensor): Column-integrated density on the
+                :math:`(x, z)` plane, shape ``(n1, n3)``.
+            rms (float): RMS radius at this snapshot.
+            energy (dict): Energy breakdown, with the keys ``e_kin``,
+                ``e_pot``, ``e_int`` and ``E_total``; missing keys default to
+                zero.
+            cross_section (torch.Tensor): Cross-section line density, shape
+                ``(n1,)``.
+        """
         self._data["time"].append(t)
         self._data["column_density"].append(_to_cpu(column_density).clone())
         self._data["rms"].append(rms)
@@ -116,6 +156,9 @@ class _TorchBuffer:
             self._data["psi_imag"].append(cpu_psi.imag.clone())
 
     def finalise(self):
+        r"""
+        Stack the buffered snapshots and write them to the ``.pt`` file.
+        """
         payload = {
             "metadata": self._metadata,
             "time": torch.tensor(self._data["time"], dtype=torch.float64),
@@ -135,6 +178,12 @@ class _TorchBuffer:
 # ---------------------------------------------------------------------------
 
 def _hdf5_available() -> bool:
+    r"""
+    Report whether the HDF5 backend can be used.
+
+    Returns:
+        bool: ``True`` when ``h5py`` is importable.
+    """
     try:
         import h5py  # noqa: F401
         return True
@@ -143,7 +192,21 @@ def _hdf5_available() -> bool:
 
 
 class _HDF5Buffer:
-    """Writes snapshots directly into an HDF5 file with chunked datasets."""
+    r"""
+    Write snapshots directly into an HDF5 file with chunked datasets.
+
+    Every dataset is pre-allocated to its final size at construction and filled
+    in place, one snapshot per call to :meth:`append`, so host memory does not
+    grow with the run length. The column density and the wavefunction datasets
+    are chunked one snapshot at a time and gzip-compressed.
+
+    Args:
+        path (str): Path of the ``.h5`` file to write.
+        n1 (int): Number of grid points along the first axis.
+        n2 (int): Number of grid points along the second axis.
+        n3 (int): Number of grid points along the third axis.
+        shots (int): Number of snapshots that will be recorded.
+    """
 
     def __init__(self, path: str, n1: int, n2: int, n3: int, shots: int):
         import h5py
@@ -169,6 +232,16 @@ class _HDF5Buffer:
         self._psi_datasets_created = False
 
     def set_metadata(self, meta: dict):
+        r"""
+        Write the run metadata as attributes of the ``/metadata`` group.
+
+        Values that HDF5 cannot store natively are saved as their string
+        representation.
+
+        Args:
+            meta (dict): Simulation metadata, such as the grid parameters and
+                the trap frequencies.
+        """
         grp = self._f.require_group("metadata")
         for k, v in meta.items():
             try:
@@ -177,6 +250,12 @@ class _HDF5Buffer:
                 grp.attrs[k] = str(v)
 
     def enable_full_psi(self):
+        r"""
+        Create the ``psi/real`` and ``psi/imag`` datasets, so that the full
+        complex wavefunction is stored for every snapshot.
+
+        The call is idempotent: the datasets are created only once.
+        """
         if not self._psi_datasets_created:
             shape = (self._shots, self._n1, self._n2, self._n3)
             chunks = (1, self._n1, self._n2, self._n3)
@@ -199,6 +278,23 @@ class _HDF5Buffer:
         energy: Dict[str, float],
         cross_section: torch.Tensor,
     ):
+        r"""
+        Write one snapshot into the pre-allocated datasets.
+
+        Args:
+            psi (torch.Tensor): Complex wavefunction of shape
+                ``(n1, n2, n3)``; written only when the full :math:`\psi`
+                datasets have been created.
+            t (float): Current simulation time.
+            column_density (torch.Tensor): Column-integrated density on the
+                :math:`(x, z)` plane, shape ``(n1, n3)``.
+            rms (float): RMS radius at this snapshot.
+            energy (dict): Energy breakdown, with the keys ``e_kin``,
+                ``e_pot``, ``e_int`` and ``E_total``; missing keys default to
+                zero.
+            cross_section (torch.Tensor): Cross-section line density, shape
+                ``(n1,)``.
+        """
         i = self._idx
         self._f["time"][i] = t
         self._f["density/column"][i] = _to_cpu(column_density).numpy()
@@ -219,6 +315,7 @@ class _HDF5Buffer:
         self._idx += 1
 
     def finalise(self):
+        r"""Flush the buffers and close the HDF5 file."""
         self._f.flush()
         self._f.close()
 
@@ -228,26 +325,27 @@ class _HDF5Buffer:
 # ---------------------------------------------------------------------------
 
 class SnapshotWriter:
-    """
+    r"""
     High-level writer that picks the best available backend.
 
-    Parameters
-    ----------
-    run_name : str
-        Base name for the output file (extension added automatically).
-    n1, n2, n3 : int
-        Grid dimensions.
-    shots : int
-        Number of snapshots that will be recorded.
-    backend : str, optional
-        ``"auto"`` (default) selects HDF5 if available, else torch.
-        ``"torch"`` forces PyTorch ``.pt`` backend.
-        ``"hdf5"`` forces HDF5 (raises if h5py missing).
-    store_full_psi : bool, optional
-        If True, the full complex wavefunction is stored per snapshot.
-        Defaults to False to save disk space.
-    metadata : dict, optional
-        Simulation metadata (grid params, frequencies, etc.) to embed.
+    Args:
+        run_name (str): Base name for the output file; the extension is added
+            automatically.
+        n1 (int): Number of grid points along the first axis.
+        n2 (int): Number of grid points along the second axis.
+        n3 (int): Number of grid points along the third axis.
+        shots (int): Number of snapshots that will be recorded.
+        backend (str): ``"auto"`` (default) selects HDF5 if it is available and
+            falls back to torch; ``"torch"`` forces the PyTorch ``.pt``
+            backend; ``"hdf5"`` forces HDF5.
+        store_full_psi (bool): If ``True``, the full complex wavefunction is
+            stored per snapshot. Defaults to ``False``, to save disk space.
+        metadata (dict): Simulation metadata (grid parameters, frequencies and
+            so on) to embed in the file.
+
+    Raises:
+        ImportError: If the HDF5 backend is requested but ``h5py`` is not
+            installed.
     """
 
     def __init__(
@@ -287,6 +385,9 @@ class SnapshotWriter:
 
     @property
     def filepath(self) -> str:
+        r"""
+        str: Path of the run file, with the extension chosen by the backend.
+        """
         return self._path
 
     def append(
@@ -298,26 +399,23 @@ class SnapshotWriter:
         energy: Dict[str, float],
         cross_section: torch.Tensor,
     ):
-        """
+        r"""
         Record one snapshot.
 
-        Parameters
-        ----------
-        psi : torch.Tensor, complex (n1, n2, n3)
-            Current wavefunction (may be on GPU).
-        t : float
-            Current simulation time.
-        column_density : torch.Tensor (n1, n3)
-            Column-integrated density on the x-z plane.
-        rms : float
-            RMS radius at this snapshot.
-        energy : dict
-            Keys: ``e_kin``, ``e_pot``, ``e_int``, ``E_total``.
-        cross_section : torch.Tensor (n1,)
-            Cross-section line density.
+        Args:
+            psi (torch.Tensor): Current complex wavefunction of shape
+                ``(n1, n2, n3)``; it may live on the GPU.
+            t (float): Current simulation time.
+            column_density (torch.Tensor): Column-integrated density on the
+                :math:`(x, z)` plane, shape ``(n1, n3)``.
+            rms (float): RMS radius at this snapshot.
+            energy (dict): Energy breakdown, with the keys ``e_kin``,
+                ``e_pot``, ``e_int`` and ``E_total``.
+            cross_section (torch.Tensor): Cross-section line density, shape
+                ``(n1,)``.
         """
         self._buf.append(psi, t, column_density, rms, energy, cross_section)
 
     def finalise(self):
-        """Flush and close the output file."""
+        r"""Flush and close the output file."""
         self._buf.finalise()

@@ -1,87 +1,112 @@
-"""
-Finite-temperature BEC model using the Stochastic Projected
-Gross-Pitaevskii Equation (SGPE).
+r"""
+Finite-temperature BEC model using the Stochastic Projected Gross-Pitaevskii
+Equation (SGPE).
 
-Physics background
-------------------
 At zero temperature the condensate evolves under the Gross-Pitaevskii equation
-(GPE).  At finite temperature the condensate is coupled to a thermal reservoir
-of non-condensed atoms.  The SGPE captures this coupling through two extra terms:
+(GPE). At finite temperature it is coupled to a thermal reservoir of
+non-condensed atoms, and the SGPE captures that coupling with two extra terms,
+a damping term and a noise term:
 
-    ∂ψ/∂t = −(i + γ)(H_mf − μ)ψ  +  η(r, t)
-              ↑ damped GPE            ↑ thermal noise
+.. math::
 
-    H_mf = −∇²/2 + V_ext + u|ψ|²       (mean-field Hamiltonian, dimensionless)
-    μ                                     (reservoir chemical potential)
-    γ                                     (dimensionless damping rate)
-    ⟨η*(r,t) η(r',t')⟩ = 2γ k_BT δ(r−r') δ(t−t')   (fluctuation-dissipation)
+    \frac{\partial \psi}{\partial t}
+        = \underbrace{-(i + \gamma)\bigl(H_\mathrm{mf} - \mu\bigr) \psi}
+                     _{\text{damped GPE}}
+        + \underbrace{\eta(\mathbf{r}, t)}_{\text{thermal noise}},
 
-All quantities are in dimensionless units:  ħ = m = ω_ho = 1.
+where the mean-field Hamiltonian, the reservoir chemical potential :math:`\mu`
+and the dimensionless damping rate :math:`\gamma` are
 
-Reference:  C. W. Gardiner, J. R. Anglin, T. I. A. Fudge,
-            J. Phys. B 35, 1555 (2002).
-            S. J. Rooney, P. B. Blakie, A. S. Bradley,
-            Phys. Rev. A 86, 053634 (2012).
+.. math::
+
+    H_\mathrm{mf} = -\tfrac{1}{2} \nabla^{2} + V_\mathrm{ext}
+        + u \lvert \psi \rvert^{2},
+
+and the noise obeys the fluctuation-dissipation relation
+
+.. math::
+
+    \bigl\langle \eta^{*}(\mathbf{r}, t)\, \eta(\mathbf{r}', t') \bigr\rangle
+        = 2 \gamma k_B T\,
+          \delta(\mathbf{r} - \mathbf{r}')\, \delta(t - t').
+
+All quantities are in dimensionless units
+(:math:`\hbar = m = \omega_\mathrm{ho} = 1`).
+
+References:
+    C. W. Gardiner, J. R. Anglin and T. I. A. Fudge, *J. Phys. B* **35**, 1555
+    (2002).
+
+    S. J. Rooney, P. B. Blakie and A. S. Bradley, *Phys. Rev. A* **86**, 053634
+    (2012).
 """
 import torch
 from src.models.base_BEC import BaseBEC
 
 
 class FiniteTempBEC(BaseBEC):
-    """
+    r"""
     Finite-temperature BEC simulation using the SGPE.
 
-    Inherits all grid setup, ground-state initialisation, I/O, and split-step
-    machinery from BaseBEC.  Only the simulation loop and the parameter
-    initialisation are overridden.
+    All grid setup, ground-state initialisation, I/O and split-step machinery
+    is inherited from :class:`~src.models.base_BEC.BaseBEC`; only the simulation
+    loop and the parameter initialisation are overridden.
 
-    Configuration parameters (in addition to the standard BaseBEC ones)
-    -------------------------------------------------------------------
-    temperature : float
-        Dimensionless temperature k_B T / (ħ ω_ho).
-        Set to 0 to recover the damped GPE (no noise, pure dissipation).
-        Typical values for a Rb BEC near T_c: 0.1–5.
+    The following keys are read in addition to the standard
+    :class:`~src.models.base_BEC.BaseBEC` ones:
 
-    damping_coefficient : float  (default 0.03)
-        Dimensionless damping rate γ.  Controls the strength of energy exchange
-        with the thermal reservoir.
+    ``temperature`` (float)
+        Dimensionless temperature :math:`k_B T / (\hbar \omega_\mathrm{ho})`.
+        Set it to 0 to recover the damped GPE (no noise, pure dissipation).
+        Typical values for a Rb BEC near :math:`T_c` are 0.1-5.
+    ``damping_coefficient`` (float, default 0.03)
+        Dimensionless damping rate :math:`\gamma`, which controls the strength
+        of the energy exchange with the thermal reservoir. :math:`\gamma = 0`
+        gives the standard GPE with no thermal effects at all, while
+        :math:`\gamma \approx 0.01` to :math:`0.1` is the physically motivated
+        range for cold-atom BECs.
+    ``chemical_potential`` (float or None, default None)
+        Reservoir chemical potential :math:`\mu`, in units of
+        :math:`\hbar \omega_\mathrm{ho}`. If ``None``, it is computed from the
+        initial ground-state wavefunction as
+        :math:`\mu = E_\mathrm{kin} + E_\mathrm{pot} + 2 E_\mathrm{int}` and
+        kept fixed for the entire run. The factor of 2 on
+        :math:`E_\mathrm{int}` arises because :math:`\mu = \partial E /
+        \partial N` while the interaction energy scales as :math:`N^{2}`.
 
-        - γ = 0   → standard GPE (no thermal effects at all)
-        - γ ≈ 0.01–0.1 is the physically motivated range for cold-atom BECs.
+    Example:
+        Set ``"model_type": "FiniteTempBEC"`` and add these keys to the
+        simulation parameters dictionary or configuration JSON::
 
-    chemical_potential : float or None  (default None)
-        Reservoir chemical potential μ in units of ħ ω_ho.
-        If None, μ is computed from the initial ground-state wavefunction
-        as μ = e_kin + e_pot + 2·e_int, and kept fixed for the entire run.  The factor of 2 on e_int arises
-        because μ = ∂E/∂N and the interaction energy scales as N².
-
-    Usage example
-    -------------
-    Replace BEC with FiniteTempBEC in simulation.py, and add these keys to the
-    simulation parameters dictionary or configuration JSON:
-
-        "temperature": 1.5,
-        "damping_coefficient": 0.03
+            "temperature": 1.5,
+            "damping_coefficient": 0.03
     """
 
     def _initialize_custom_parameters(self) -> None:
-        """
-        Read SGPE-specific parameters from the per-simulation parameters dict.
+        r"""
+        Read the SGPE-specific parameters from the per-simulation parameters
+        dict.
 
-        temperature : float
-            k_B T / (ħ ω_ho) — dimensionless thermal energy of the reservoir.
-            Feeds directly into the noise amplitude:
-                σ = √(γ · kT · Δτ / δV)
-            Larger T → stronger fluctuations → higher condensate fraction depleted.
+        ``temperature`` (float)
+            :math:`k_B T / (\hbar \omega_\mathrm{ho})`, the dimensionless
+            thermal energy of the reservoir. It feeds directly into the noise
+            amplitude
 
-        damping_coefficient : float
-            γ — dimensionless coupling to the reservoir.
-            The (1−iγ) prefactor in the SGPE damps modes above μ and amplifies
-            modes below μ, thermalising the system to temperature T.
+            .. math::
 
-        chemical_potential : float or None
-            μ — if not provided in parameters, it is computed once from the
-            ground-state wavefunction at the start of _main_simulation_loop.
+                \sigma = \sqrt{\frac{\gamma\, kT\, \Delta\tau}{\delta V}},
+
+            so a larger :math:`T` gives stronger fluctuations and a more
+            strongly depleted condensate.
+        ``damping_coefficient`` (float)
+            :math:`\gamma`, the dimensionless coupling to the reservoir. The
+            :math:`(1 - i\gamma)` prefactor in the SGPE damps modes above
+            :math:`\mu` and amplifies modes below it, thermalising the system
+            to temperature :math:`T`.
+        ``chemical_potential`` (float or None)
+            :math:`\mu`. If it is not provided in the parameters, it is
+            computed once from the ground-state wavefunction at the start of
+            :meth:`_main_simulation_loop`.
         """
         self.temperature: float = self.parameters.get("temperature", 0.0)
         self.gamma: float = self.parameters.get("damping_coefficient", 0.03)
@@ -94,47 +119,71 @@ class FiniteTempBEC(BaseBEC):
         )
 
     def _main_simulation_loop(self) -> None:
-        """
-        SGPE time-evolution loop.
+        r"""
+        Run the SGPE time-evolution loop.
 
-        Each iteration applies three operations in sequence:
+        Each iteration applies the following operations in sequence:
 
-        1.  SGPE deterministic step  (see GPELibrary.sgpe_step)
-            Implements Strang splitting of the damped Hamiltonian:
-                exp(−(i+γ)·Δτ·(H_mf − μ))
-            Modes with H_mf > μ lose energy to the reservoir (damped).
-            Modes with H_mf < μ gain energy from the reservoir (amplified).
-            This is the mechanism that drives condensate growth at finite T.
+        1. **SGPE deterministic step** (see
+           :meth:`GPELibrary.sgpe_step <src.library.gpe_library.GPELibrary.sgpe_step>`),
+           the Strang splitting of the damped Hamiltonian
 
-        1b. Three-body loss  (see BaseBEC._apply_three_body_loss)
-            Strang-split as its own operator, half a step either side of the
-            propagator, when k3 is non-zero. It is a *separate* channel from
-            the reservoir coupling above, not a duplicate of it: γ exchanges
-            atoms between the condensate and the thermal cloud, while
-            three-body recombination ejects them from the trap entirely, so a
-            finite-temperature run generally wants both.
+           .. math::
 
-        2.  Stochastic noise injection  (see GPELibrary.generate_thermal_noise)
-            Adds a complex Gaussian noise field η satisfying:
-                ⟨η*(r,t) η(r',t')⟩ = 2γ k_BT · δ(r−r') · δ(t−t')
-            Only applied when T > 0.  Setting T = 0 with γ > 0 gives a
-            purely dissipative (imaginary-time-like) damped GPE.
+               \exp\bigl[-(i + \gamma) \Delta\tau
+                         (H_\mathrm{mf} - \mu)\bigr].
 
-        The norm is deliberately *not* reset
-            ∫|ψ|² dV is left free to evolve.  This is what makes the ensemble
-            grand-canonical: μ enters the propagator only as the constant shift
-            (H_mf − μ), so forcing the norm back to 1 after every step divides
-            that factor straight back out and reduces the run to a
-            number-conserving damped GPE in which μ has no effect at all.
-            With the norm free, N(t) = N₀·‖ψ‖² and the reservoir sets the atom
-            number through μ.  The initial ground state is very nearly a fixed
-            point of the damped propagator, so ‖ψ‖ stays close to 1 unless the
-            state is genuinely out of equilibrium with the reservoir.
+           Modes with :math:`H_\mathrm{mf} > \mu` lose energy to the reservoir
+           and modes with :math:`H_\mathrm{mf} < \mu` gain energy from it,
+           which is the mechanism that drives condensate growth at finite
+           :math:`T`.
+        2. **Three-body loss** (see
+           :meth:`~src.models.base_BEC.BaseBEC._apply_three_body_loss`),
+           Strang-split as its own operator, half a step either side of the
+           propagator, when :math:`K_3` is non-zero. It is a *separate* channel
+           from the reservoir coupling above, not a duplicate of it:
+           :math:`\gamma` exchanges atoms between the condensate and the
+           thermal cloud, while three-body recombination ejects them from the
+           trap entirely, so a finite-temperature run generally wants both.
+        3. **Stochastic noise injection** (see
+           :meth:`GPELibrary.generate_thermal_noise <src.library.gpe_library.GPELibrary.generate_thermal_noise>`),
+           which adds a complex Gaussian noise field :math:`\eta` satisfying
 
-        Chemical potential μ
-            Computed once from the ground-state wavefunction at the first
-            iteration if not provided in the parameters.  μ is then held
-            fixed throughout the run, representing the static thermal reservoir.
+           .. math::
+
+               \bigl\langle \eta^{*}(\mathbf{r}, t)\,
+                            \eta(\mathbf{r}', t') \bigr\rangle
+                   = 2 \gamma k_B T\,
+                     \delta(\mathbf{r} - \mathbf{r}')\, \delta(t - t').
+
+           This is applied only when :math:`T > 0`; setting :math:`T = 0` with
+           :math:`\gamma > 0` gives a purely dissipative, imaginary-time-like
+           damped GPE.
+
+        Note:
+            **The norm is deliberately not reset.**
+            :math:`\int \lvert \psi \rvert^{2}\, \mathrm{d}V` is left free to
+            evolve, which is what makes the ensemble grand-canonical:
+            :math:`\mu` enters the propagator only as the constant shift
+            :math:`(H_\mathrm{mf} - \mu)`, so forcing the norm back to 1 after
+            every step divides that factor straight back out and reduces the
+            run to a number-conserving damped GPE in which :math:`\mu` has no
+            effect at all. With the norm free,
+            :math:`N(t) = N_0 \lVert \psi \rVert^{2}` and the reservoir sets
+            the atom number through :math:`\mu`. The initial ground state is
+            very nearly a fixed point of the damped propagator, so
+            :math:`\lVert \psi \rVert` stays close to 1 unless the state is
+            genuinely out of equilibrium with the reservoir.
+
+        Note:
+            **Chemical potential.** :math:`\mu` is computed once from the
+            ground-state wavefunction at the first iteration if it was not
+            given in the parameters, and is then held fixed throughout the run,
+            representing the static thermal reservoir.
+
+        Raises:
+            RuntimeError: If the condensate wavefunction has not been
+                initialised.
         """
         if self.psi is None:
             raise RuntimeError("BEC wavefunction (psi) is not initialized.")

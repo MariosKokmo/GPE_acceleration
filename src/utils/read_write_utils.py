@@ -1,4 +1,13 @@
-"""This module provides the utility functions to read and write data in files"""
+r"""
+Utility functions to read and write simulation data in text files.
+
+The module covers both coordinate systems. The Cartesian helpers write
+snapshots on the :math:`(x, z)` plane; the cylindrical ones, grouped in the
+second half of the file, mirror them on the :math:`(r, \varphi)` plane of a
+grid of shape :math:`(n_r, n_\varphi, n_z)`. All files are CSV with one row per
+grid point, and positions are converted to micrometres through the
+harmonic-oscillator length ``a_ho``.
+"""
 import numpy as np
 import torch
 import pandas as pd
@@ -6,25 +15,29 @@ import matplotlib.pyplot as plt
 from src.library.gpe_library import GPE2DLibrary as gpe2d
 
 def write_psi(file_name, psi, n1, n2, n3):
-    """
-    Writes the wavefunction of the condensate to a file.
-    Usually used for the ground state.
+    r"""
+    Write the condensate wavefunction to a file, usually the ground state.
 
-    One line per grid point, `(real,imag)`, in row-major order over
-    (n1, n2, n3) — the format `GroundState.read_ground_state` expects.
+    The format is one line per grid point, ``(real,imag)``, in row-major order
+    over :math:`(n_1, n_2, n_3)` — what
+    :meth:`GroundState.read_ground_state <src.library.ground_state.GroundState.read_ground_state>`
+    expects.
 
-    Written in a single vectorised pass. The previous element-by-element loop
+    The write is a single vectorised pass. The previous element-by-element loop
     cost a device round-trip per point, which ran to minutes for a full 3-D
-    grid. `%.17g` round-trips float64 exactly, so the stored state is bit-for-bit
-    recoverable.
+    grid. ``%.17g`` round-trips float64 exactly, so the stored state is
+    bit-for-bit recoverable.
 
     Args:
-      file_name: str, the name of the file to be created
-      psi: torch.Tensor, the wavefunction of the condensate
-      n1, n2, n3: integer, the grid points in the 3 dimensions
+        file_name (str): Name of the file to create.
+        psi (torch.Tensor): Condensate wavefunction.
+        n1 (int): Number of grid points along the first dimension.
+        n2 (int): Number of grid points along the second dimension.
+        n3 (int): Number of grid points along the third dimension.
 
     Raises:
-      ValueError: if psi does not hold exactly n1*n2*n3 points.
+        ValueError: If ``psi`` does not hold exactly
+            :math:`n_1 n_2 n_3` points.
     """
     values = psi.detach().cpu().numpy().reshape(-1)
     expected = n1 * n2 * n3
@@ -38,8 +51,31 @@ def write_psi(file_name, psi, n1, n2, n3):
     np.savetxt(file_name, columns, fmt='(%.17g,%.17g)')
 
 def write_data(psi1, count, x1, x3, n1, n3, a_ho, dx):
-    """
-    Writes the column density data on the x-z plane
+    r"""
+    Write the column density on the :math:`(x, z)` plane to a snapshot file.
+
+    The density is integrated along :math:`y`,
+
+    .. math::
+
+        n(x, z) = \int \lvert \psi \rvert^{2}\, \mathrm{d}y
+            \approx \sum_j \bigl\lvert \psi[i, j, k] \bigr\rvert^{2}\,
+              \mathrm{d}y,
+
+    and written to ``R-{count}-cd.dat`` as ``x_μm, z_μm, n(x,z)``.
+
+    Args:
+        psi1 (torch.Tensor): Condensate wavefunction of shape
+            ``(n1, n2, n3)``.
+        count (int): Snapshot index used in the file name.
+        x1 (torch.Tensor): Axis along x, in dimensionless units.
+        x3 (torch.Tensor): Axis along z, in dimensionless units.
+        n1 (int): Number of grid points along x.
+        n3 (int): Number of grid points along z.
+        a_ho (float): Harmonic-oscillator length in metres, used to convert the
+            positions to micrometres.
+        dx (sequence): Grid spacings; only ``dx[1]``, the spacing along y, is
+            used.
     """
     dy = dx[1] # the grid spacing along the y direction
     file_name = f'R-{count:003}-cd.dat'
@@ -52,8 +88,23 @@ def write_data(psi1, count, x1, x3, n1, n3, a_ho, dx):
                 f.write(f'{first},{second},{third}\n')
 
 def write_phase(phase, count, x1, x2, x3, n1, n2, n3, a_ho):
-    """
-    Writes the 3D phase in a file.
+    r"""
+    Write the full 3-D phase to a file.
+
+    The format is ``x_μm, y_μm, z_μm, phase``, one row per grid point, written
+    to ``P-{count}-cd.dat``.
+
+    Args:
+        phase (torch.Tensor): Phase :math:`\arg \psi` of shape
+            ``(n1, n2, n3)``.
+        count (int): Snapshot index used in the file name.
+        x1 (torch.Tensor): Axis along x, in dimensionless units.
+        x2 (torch.Tensor): Axis along y, in dimensionless units.
+        x3 (torch.Tensor): Axis along z, in dimensionless units.
+        n1 (int): Number of grid points along x.
+        n2 (int): Number of grid points along y.
+        n3 (int): Number of grid points along z.
+        a_ho (float): Harmonic-oscillator length in metres.
     """
     file_name = f'P-{count:003}-cd.dat'
     with open(file_name, 'w') as f:
@@ -67,9 +118,18 @@ def write_phase(phase, count, x1, x2, x3, n1, n2, n3, a_ho):
                     f.write(f'{first},{second},{third},{fourth}\n')
 
 def write_rms(rms_meas, SimulationName):
-    """
-    writes the RMS radius measurements for the BEC
-    in a default file 'rms_meas.txt'
+    r"""
+    Write the RMS radius measurements of the BEC to a text file.
+
+    The output is tab-delimited with a ``t\tr`` header, written to
+    ``{SimulationName}_RMS_meas.txt`` — the format
+    :func:`save_rms_figure` reads back.
+
+    Args:
+        rms_meas (dict): RMS radius per snapshot, keyed by time or snapshot
+            index.
+        SimulationName (str): Base name of the simulation, used for the file
+            name.
     """
     with open(f'{SimulationName}_RMS_meas.txt', 'w') as f:
         f.write("t\tr\n")
@@ -77,10 +137,24 @@ def write_rms(rms_meas, SimulationName):
             f.write(f"{t}\t{r}\n")
 
 def write_phase2D(phase, count, x1, x3, n1, n2, n3, a_ho):
-    """
-    Writes the 2D phase in a file.
-    It assumes the plane is the n1-n3
-    and the central cross-section i.e. n2 is at its midpoint
+    r"""
+    Write the 2-D phase to a file.
+
+    The plane is assumed to be :math:`(n_1, n_3)` at the central cross-section,
+    i.e. the midpoint :math:`n_2 / 2` of the second axis. The format is
+    ``x_μm, z_μm, phase``, written to ``P-{count}-cd.dat``.
+
+    Args:
+        phase (torch.Tensor): Phase :math:`\arg \psi` of shape
+            ``(n1, n2, n3)``.
+        count (int): Snapshot index used in the file name.
+        x1 (torch.Tensor): Axis along x, in dimensionless units.
+        x3 (torch.Tensor): Axis along z, in dimensionless units.
+        n1 (int): Number of grid points along x.
+        n2 (int): Number of grid points along y, used only to locate the
+            midplane.
+        n3 (int): Number of grid points along z.
+        a_ho (float): Harmonic-oscillator length in metres.
     """
     j = n2//2
     file_name = f'P-{count:003}-cd.dat'
@@ -93,9 +167,17 @@ def write_phase2D(phase, count, x1, x3, n1, n2, n3, a_ho):
                 f.write(f'{first},{third},{fourth}\n')
 
 def read_phase_file_2D(filename, n1, n3):
-    """
-    Reads a file that stores the phase of a 2D cross-section.
-    It returns the phase as a tensor reshaped as n1 x n3.
+    r"""
+    Read a file storing the phase of a 2-D cross-section.
+
+    Args:
+        filename (str): Path of the file to read, as written by
+            :func:`write_phase2D`.
+        n1 (int): Number of grid points along the first axis.
+        n3 (int): Number of grid points along the second axis.
+
+    Returns:
+        torch.Tensor: The phase, reshaped to ``(n1, n3)``.
     """
     phase = pd.read_csv(filename, header=None, names=['x1', 'x2', 'phase'])
     phase = phase.astype(np.float64)
@@ -105,25 +187,35 @@ def read_phase_file_2D(filename, n1, n3):
     return phase
 
 def write_velocity2D(psi, count, x1, x3, n1, n2, n3, a_ho, p_grid):
-    """
-    Writes the 2D velocity in a file.
-    It assumes the plane is the n1-n3.
-    The format of the file is `x1, x3, velocity magnitude, velocity direction`
+    r"""
+    Write the 2-D velocity field to a file.
 
-    Takes the wavefunction rather than its phase: the velocity is
-    Im(psi* grad psi)/|psi|^2, which is free of the 2*pi branch cuts that make
-    a phase-derived velocity field meaningless around a vortex.
+    The plane is assumed to be :math:`(n_1, n_3)`, and the file format is
+    ``x_μm, z_μm, velocity magnitude, velocity direction``.
+
+    The function takes the wavefunction rather than its phase, because the
+    velocity
+
+    .. math::
+
+        \mathbf{v} = \frac{\operatorname{Im}
+            \bigl(\psi^{*} \nabla \psi\bigr)}{\lvert \psi \rvert^{2}}
+
+    is free of the :math:`2\pi` branch cuts that make a phase-derived velocity
+    field meaningless around a vortex.
 
     Args:
-        psi (torch.Tensor): the condensate wavefunction (n1, n2, n3).
-        count (int): the snapshot number.
-        x1, x3 (torch.Tensor): the axes.
-        n1, n3 (int): the grid resolution along x1 and x3.
-        a_ho (float): the harmonic oscillator length.
-        p_grid (tuple): momentum meshgrids.
-
-    Returns:
-        None
+        psi (torch.Tensor): Condensate wavefunction of shape
+            ``(n1, n2, n3)``.
+        count (int): Snapshot index used in the file name.
+        x1 (torch.Tensor): Axis along x, in dimensionless units.
+        x3 (torch.Tensor): Axis along z, in dimensionless units.
+        n1 (int): Number of grid points along x.
+        n2 (int): Number of grid points along y, used only to locate the
+            midplane.
+        n3 (int): Number of grid points along z.
+        a_ho (float): Harmonic-oscillator length in metres.
+        p_grid (tuple): Momentum meshgrids.
     """
     j = n2//2
     vel_file_name = f'V-{count:003}-cd.dat'
@@ -138,22 +230,35 @@ def write_velocity2D(psi, count, x1, x3, n1, n2, n3, a_ho, p_grid):
                 f.write(f'{first},{second},{third},{fourth}\n')
 
 def save_figure_phase(phase, frame):
-    """Saves a figure of the phase"""
+    r"""
+    Save an image of the phase at the :math:`y` midplane.
+
+    Args:
+        phase (torch.Tensor): Phase array of shape ``(n1, n2, n3)``; a complex
+            array is reduced to its real part.
+        frame (int): Snapshot index used in the title and the file name.
+    """
     n1, n2, n3 = phase.shape
     if phase.dtype == torch.cdouble:
       plt.imshow((phase[:,n2//2,:].cpu().real),cmap='jet')
     else:
       plt.imshow((phase[:,n2//2,:].cpu()),cmap='jet')
-    cb = plt.colorbar() 
+    cb = plt.colorbar()
     plt.title(f"Phase t = {frame}")
     plt.savefig(f"phase_t_{frame}.png")
     cb.remove()
 
 def save_rms_figure(title):
-    """
-    Reads a file delimited by tabs with the first
-    column being the time and the second column being
-    the quantity of interest i.e. RMS value
+    r"""
+    Plot a time series from a tab-delimited file and save it as a PNG.
+
+    The file is expected to have one header row, the time in the first column
+    and the quantity of interest, i.e. the RMS value, in the second — the
+    format :func:`write_rms` produces.
+
+    Args:
+        title (str): Path of the file to read; its stem is reused for the title
+            and the output file name.
     """
     data = np.loadtxt(title, skiprows=1, delimiter="\t")
     plt.figure()
@@ -164,10 +269,16 @@ def save_rms_figure(title):
     plt.savefig(f"RMS_{title[:-3]}.png")
 
 def save_cross_section_line_figure(cross_line_data):
-    """
-    Assumes data of shape (snapshots, position)
-    Data consists of rows where each row is a snapshot of the
-    density values across the section
+    r"""
+    Save a 3-D waterfall plot of the cross-section line density.
+
+    The input has shape ``(snapshots, position)``: each row is one snapshot of
+    the density values across the section, and the rows are stacked along the
+    time axis of the plot.
+
+    Args:
+        cross_line_data (torch.Tensor): Line densities of shape
+            ``(shots, dim)``.
     """
     shots, dim = cross_line_data.shape
     ax = plt.figure(figsize=(12,16)).add_subplot(projection='3d')
@@ -186,13 +297,22 @@ def save_cross_section_line_figure(cross_line_data):
 
 
 def save_tensor_to_csv(tensor, filename):
+    r"""
+    Save a tensor to a CSV file, without an index or a header.
+
+    Args:
+        tensor (torch.Tensor): Tensor to save; it must live on the CPU.
+        filename (str): Destination path.
+    """
     tensor_np = tensor.numpy() #convert to Numpy array
     df = pd.DataFrame(tensor_np) #convert to a dataframe
     df.to_csv(filename,index=False, header=None) #save to file
 
 def write_energy_terms(energies, filename):
-    """
-    Writes the energy allocation in a file.
+    r"""
+    Write the energy allocation to a file.
+
+    One row per snapshot, ``e_kin,e_pot,e_int,E_total``.
 
     Args:
         energies (list[dict]): One dictionary per snapshot, holding the energy
@@ -224,25 +344,34 @@ def write_energy_terms(energies, filename):
 
 
 def write_data_cylindrical(psi, count, r, phi, n_r, n_phi, a_ho, dz):
-    """
-    Write the z-integrated column density n(r, φ) to a snapshot file.
+    r"""
+    Write the :math:`z`-integrated column density
+    :math:`n(r, \varphi)` to a snapshot file.
 
-    Suited for pancake-geometry BECs where z is the tightly confined axis.
-    Integrating out z gives the 2-D density in the r-φ plane:
+    This suits pancake-geometry BECs, where :math:`z` is the tightly confined
+    axis. Integrating it out gives the 2-D density in the
+    :math:`(r, \varphi)` plane,
 
-        n(r, φ) = Σ_k |ψ[i, j, k]|² · dz
+    .. math::
 
-    File format (CSV, one row per (r, φ) point):
-        r_μm, phi_rad, n(r,phi)
+        n(r, \varphi) = \int \lvert \psi \rvert^{2}\, \mathrm{d}z
+            \approx \sum_k \bigl\lvert \psi[i, j, k] \bigr\rvert^{2}\,
+              \mathrm{d}z,
+
+    written to ``R-{count}-cd.dat`` as ``r_μm, phi_rad, n(r,phi)``, one row per
+    :math:`(r, \varphi)` point.
 
     Args:
-        psi        : wavefunction tensor of shape (n_r, n_phi, n_z).
-        count      : snapshot index used in the filename.
-        r          : 1-D radial grid (n_r,) in dimensionless units.
-        phi        : 1-D azimuthal grid (n_phi,) in radians.
-        n_r, n_phi : grid point counts.
-        a_ho       : harmonic oscillator length in metres (converts to µm).
-        dz         : axial grid spacing (dimensionless).
+        psi (torch.Tensor): Wavefunction of shape ``(n_r, n_phi, n_z)``.
+        count (int): Snapshot index used in the file name.
+        r (torch.Tensor): Radial grid of shape ``(n_r,)``, in dimensionless
+            units.
+        phi (torch.Tensor): Azimuthal grid of shape ``(n_phi,)``, in radians.
+        n_r (int): Number of radial grid points.
+        n_phi (int): Number of azimuthal grid points.
+        a_ho (float): Harmonic-oscillator length in metres, used to convert the
+            radius to micrometres.
+        dz (float): Axial grid spacing, in dimensionless units.
     """
     file_name = f'R-{count:003}-cd.dat'
     col_density = torch.sum(torch.abs(psi) ** 2, dim=2) * dz   # (n_r, n_phi)
@@ -255,21 +384,22 @@ def write_data_cylindrical(psi, count, r, phi, n_r, n_phi, a_ho, dz):
 
 
 def write_phase2D_cylindrical(phase, count, r, phi, n_r, n_phi, a_ho, z_idx=None):
-    """
-    Write the wavefunction phase on the r-φ plane at a fixed z index.
+    r"""
+    Write the wavefunction phase on the :math:`(r, \varphi)` plane at a fixed
+    :math:`z` index.
 
-    File format (CSV):
-        r_μm, phi_rad, phase
+    The format is ``r_μm, phi_rad, phase``, written to ``P-{count}-cd.dat``.
 
     Args:
-        phase        : phase tensor of shape (n_r, n_phi, n_z).
-        count        : snapshot index.
-        r            : 1-D radial grid in dimensionless units.
-        phi          : 1-D azimuthal grid in radians.
-        n_r, n_phi   : grid point counts.
-        a_ho         : harmonic oscillator length in metres.
-        z_idx        : index along the z axis to slice at.
-                       Defaults to the midpoint (n_z // 2).
+        phase (torch.Tensor): Phase tensor of shape ``(n_r, n_phi, n_z)``.
+        count (int): Snapshot index used in the file name.
+        r (torch.Tensor): Radial grid, in dimensionless units.
+        phi (torch.Tensor): Azimuthal grid, in radians.
+        n_r (int): Number of radial grid points.
+        n_phi (int): Number of azimuthal grid points.
+        a_ho (float): Harmonic-oscillator length in metres.
+        z_idx (int): Index along the :math:`z` axis to slice at. Defaults to
+            the midpoint ``n_z // 2``.
     """
     n_z = phase.shape[2]
     if z_idx is None:
@@ -287,25 +417,28 @@ def write_phase2D_cylindrical(phase, count, r, phi, n_r, n_phi, a_ho, z_idx=None
 
 
 def write_radial_profile(psi, count, r, n_r, a_ho, dphi, dz):
-    """
-    Write the 1-D radial density profile n(r) to a file.
+    r"""
+    Write the 1-D radial density profile :math:`n(r)` to a file.
 
-    n(r) = ∫∫ |ψ(r, φ, z)|² dφ dz  ≈  Σ_{j,k} |ψ[i,j,k]|² · dφ · dz
+    .. math::
+
+        n(r) = \iint \bigl\lvert \psi(r, \varphi, z) \bigr\rvert^{2}\,
+                 \mathrm{d}\varphi\, \mathrm{d}z
+            \approx \sum_{j, k} \bigl\lvert \psi[i, j, k] \bigr\rvert^{2}\,
+              \mathrm{d}\varphi\, \mathrm{d}z
 
     This diagnostic has no direct Cartesian counterpart and is natural to
-    cylindrical geometry (e.g. for checking the Thomas-Fermi radius).
-
-    File format (CSV):
-        r_μm, n(r)
+    cylindrical geometry, for instance when checking the Thomas-Fermi radius.
+    The format is ``r_μm, n(r)``, written to ``Rad-{count}-profile.dat``.
 
     Args:
-        psi   : wavefunction tensor of shape (n_r, n_phi, n_z).
-        count : snapshot index.
-        r     : 1-D radial grid in dimensionless units.
-        n_r   : number of radial grid points.
-        a_ho  : harmonic oscillator length in metres.
-        dphi  : azimuthal grid spacing.
-        dz    : axial grid spacing.
+        psi (torch.Tensor): Wavefunction of shape ``(n_r, n_phi, n_z)``.
+        count (int): Snapshot index used in the file name.
+        r (torch.Tensor): Radial grid, in dimensionless units.
+        n_r (int): Number of radial grid points.
+        a_ho (float): Harmonic-oscillator length in metres.
+        dphi (float): Azimuthal grid spacing.
+        dz (float): Axial grid spacing.
     """
     file_name = f'Rad-{count:003}-profile.dat'
     with open(file_name, 'w') as f:
@@ -316,13 +449,16 @@ def write_radial_profile(psi, count, r, n_r, a_ho, dphi, dz):
 
 
 def save_figure_phase_cylindrical(phase, frame, z_idx=None):
-    """
-    Save an image of the wavefunction phase on the r-φ plane at a fixed z index.
+    r"""
+    Save an image of the wavefunction phase on the :math:`(r, \varphi)` plane
+    at a fixed :math:`z` index.
 
     Args:
-        phase : phase tensor of shape (n_r, n_phi, n_z).
-        frame : snapshot index used in the title and filename.
-        z_idx : index along z to slice at. Defaults to the midpoint (n_z // 2).
+        phase (torch.Tensor): Phase tensor of shape ``(n_r, n_phi, n_z)``; a
+            complex tensor is reduced to its real part.
+        frame (int): Snapshot index used in the title and the file name.
+        z_idx (int): Index along :math:`z` to slice at. Defaults to the
+            midpoint ``n_z // 2``.
     """
     n_z = phase.shape[2]
     if z_idx is None:
@@ -342,32 +478,49 @@ def save_figure_phase_cylindrical(phase, frame, z_idx=None):
 
 
 def write_velocity_cylindrical(psi, count, r, phi, n_r, n_phi, a_ho, dr, m_modes, z_idx=None):
-    """
-    Write the superfluid velocity field (vr, v_φ) on the r-φ plane at a fixed z index.
+    r"""
+    Write the superfluid velocity field :math:`(v_r, v_\varphi)` on the
+    :math:`(r, \varphi)` plane at a fixed :math:`z` index.
 
-    Suited for pancake-geometry BECs.  Velocity components in dimensionless
-    units (ħ/m = 1):
+    This suits pancake-geometry BECs. In dimensionless units
+    (:math:`\hbar / m = 1`) the components are
 
-        v_r(r, φ) = Im(ψ* ∂ψ/∂r) / |ψ|²         — central finite differences in r
-        v_φ(r, φ) = Im(ψ* (1/r) ∂ψ/∂φ) / |ψ|²   — spectral (DFT in φ)
+    .. math::
 
-    Grid points whose density is below 1e-12 of the peak are set to zero. The
-    cut is relative because ψ is normalised over the whole grid, so an absolute
-    threshold means something different at every resolution.
+        v_r(r, \varphi)
+            &= \frac{\operatorname{Im}
+               \bigl(\psi^{*}\, \partial_r \psi\bigr)}
+               {\lvert \psi \rvert^{2}}, \\
+        v_\varphi(r, \varphi)
+            &= \frac{\operatorname{Im}
+               \bigl(\psi^{*}\, r^{-1} \partial_\varphi \psi\bigr)}
+               {\lvert \psi \rvert^{2}},
 
-    File format (CSV):
-        r_μm, phi_rad, vr, v_phi, |v|
+    where the radial derivative is evaluated with central finite differences
+    (one-sided at the two ends) and the azimuthal one spectrally, through a DFT
+    in :math:`\varphi`.
+
+    Grid points whose density is below :math:`10^{-12}` of the peak are set to
+    zero. The cut is relative because :math:`\psi` is normalised over the whole
+    grid, so an absolute threshold would mean something different at every
+    resolution.
+
+    The format is ``r_μm, phi_rad, vr, v_phi, |v|``, written to
+    ``V-{count}-cd.dat``.
 
     Args:
-        psi          : wavefunction (n_r, n_phi, n_z).
-        count        : snapshot index.
-        r            : 1-D radial grid in dimensionless units.
-        phi          : 1-D azimuthal grid in radians.
-        n_r, n_phi   : grid point counts.
-        a_ho         : harmonic oscillator length in metres.
-        dr           : radial grid spacing.
-        m_modes      : azimuthal mode indices (n_phi,) from init_grid.
-        z_idx        : index along z to slice at. Defaults to n_z // 2.
+        psi (torch.Tensor): Wavefunction of shape ``(n_r, n_phi, n_z)``.
+        count (int): Snapshot index used in the file name.
+        r (torch.Tensor): Radial grid, in dimensionless units.
+        phi (torch.Tensor): Azimuthal grid, in radians.
+        n_r (int): Number of radial grid points.
+        n_phi (int): Number of azimuthal grid points.
+        a_ho (float): Harmonic-oscillator length in metres.
+        dr (float): Radial grid spacing.
+        m_modes (torch.Tensor): Azimuthal mode indices of shape ``(n_phi,)``,
+            as returned by ``init_grid``.
+        z_idx (int): Index along :math:`z` to slice at. Defaults to
+            ``n_z // 2``.
     """
     n_z = psi.shape[2]
     if z_idx is None:

@@ -1,14 +1,17 @@
-"""
+r"""
 Test-particle Monte Carlo dynamics for the thermal cloud in the ZNG framework.
 
-This module evolves N_test classical particles under the mean-field potential
-U(r) = V_ext + 2u(n_c + ñ) and handles stochastic condensate↔thermal
-collisions (C_12) and the thermal–thermal scattering stub (C_22).
+This module evolves :math:`N_\mathrm{test}` classical particles under the
+mean-field potential
+:math:`U = V_\mathrm{ext} + 2u (n_c + \tilde{n})`, and handles the stochastic
+condensate-thermal collisions (:math:`C_{12}`) together with the
+thermal-thermal scattering stub (:math:`C_{22}`).
 
-All functions are stateless — they take tensors, return tensors.
-No simulation objects are imported.
+All functions here are stateless: they take tensors and return tensors. No
+simulation objects are imported.
 
-Dimensionless units: ħ = m = ω_ho = 1.
+Dimensionless units are used throughout
+(:math:`\hbar = m = \omega_\mathrm{ho} = 1`).
 """
 
 import math
@@ -36,29 +39,37 @@ def compute_particle_forces(
     p_grid: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
     device: torch.device,
 ) -> torch.Tensor:
-    """
-    Compute the classical force F = −∇U on each test particle.
+    r"""
+    Compute the classical force :math:`\mathbf{F} = -\nabla U` on each test
+    particle.
 
-    Step 1 — spectral gradient:  compute (∂U/∂x, ∂U/∂y, ∂U/∂z) on the grid
-    using FFT-based differentiation (spectral accuracy for smooth, periodic fields).
+    The force is obtained in two steps. First the gradient
+    :math:`(\partial_x U, \partial_y U, \partial_z U)` is evaluated on the grid
+    by FFT-based differentiation, which is spectrally accurate for smooth,
+    periodic fields. Each gradient component is then interpolated trilinearly
+    from the grid to the particle position. In dimensionless units
+    (:math:`m = 1`) the force is simply
 
-    Step 2 — grid→particle interpolation:  trilinearly interpolate each gradient
-    component from the grid to the particle position.
+    .. math::
 
-    In dimensionless units (m = 1): F_i = −(∇U)_i.
+        F_\alpha = -\bigl(\nabla U\bigr)_\alpha .
 
     Args:
-        U (torch.Tensor): Mean-field potential on the grid, shape (n1, n2, n3).
-            Should be real-valued; any imaginary part is discarded.
-        positions (torch.Tensor): Particle positions, shape (N_test, 3).
-        n1, n2, n3 (int): Grid point counts.
-        x_min (torch.Tensor): Lower box boundaries, length 3.
-        dx (torch.Tensor): Grid spacings, length 3.
-        p_grid (tuple): (px, py, pz) 3-D momentum meshgrids for FFT gradients.
+        U (torch.Tensor): Mean-field potential on the grid, shape
+            ``(n1, n2, n3)``. It should be real-valued; any imaginary part is
+            discarded.
+        positions (torch.Tensor): Particle positions, shape ``(N_test, 3)``.
+        n1 (int): Number of grid points along the first axis.
+        n2 (int): Number of grid points along the second axis.
+        n3 (int): Number of grid points along the third axis.
+        x_min (torch.Tensor): Lower box boundaries, shape ``(3,)``.
+        dx (torch.Tensor): Grid spacings per axis, shape ``(3,)``.
+        p_grid (tuple): Momentum meshgrids ``(px, py, pz)`` used for the FFT
+            gradients.
         device (torch.device): Computation device.
 
     Returns:
-        torch.Tensor: Forces, shape (N_test, 3).
+        torch.Tensor: Forces on the particles, shape ``(N_test, 3)``.
     """
     grad_x, grad_y, grad_z = spectral_gradient_3d(U.real, p_grid)
 
@@ -83,41 +94,53 @@ def advance_particles_leapfrog(
     dtau: float,
     device: torch.device,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Advance test particles by one time step using the velocity-Verlet
+    r"""
+    Advance the test particles by one time step with the velocity-Verlet
     (leapfrog) integrator.
 
-    Leapfrog is symplectic — it conserves a shadow Hamiltonian exactly, giving
-    no secular drift in particle energy even over long integrations.  This is
-    important for correctly representing the equilibrium Boltzmann distribution.
+    Leapfrog is symplectic: it conserves a shadow Hamiltonian exactly, so there
+    is no secular drift in particle energy even over long integrations. That is
+    what keeps the equilibrium Boltzmann distribution correctly represented.
+    One step, in velocity-Verlet form, is
 
-    Algorithm (velocity Verlet form):
-        1.  F_n    = −∇U_n(r_n)           (force at current position)
-        2.  p_half = p_n + (dt/2) F_n      (half momentum step)
-        3.  r_{n+1} = r_n + dt p_half      (full position step, m=1)
-        4.  F_{n+1} = −∇U_{n+1}(r_{n+1})  (force at new position and new potential)
-        5.  p_{n+1} = p_half + (dt/2) F_{n+1}  (second half momentum step)
+    .. math::
 
-    U_current and U_next are provided separately because U depends on n_c and ñ,
-    which change during the condensate evolution step.
+        \mathbf{F}_n &= -\nabla U_n(\mathbf{r}_n), \\
+        \mathbf{p}_{n + 1/2} &= \mathbf{p}_n
+            + \tfrac{1}{2} \Delta t\, \mathbf{F}_n, \\
+        \mathbf{r}_{n+1} &= \mathbf{r}_n
+            + \Delta t\, \mathbf{p}_{n + 1/2}, \\
+        \mathbf{F}_{n+1} &= -\nabla U_{n+1}(\mathbf{r}_{n+1}), \\
+        \mathbf{p}_{n+1} &= \mathbf{p}_{n + 1/2}
+            + \tfrac{1}{2} \Delta t\, \mathbf{F}_{n+1},
+
+    where the position step uses :math:`m = 1`. ``U_current`` and ``U_next``
+    are supplied separately because :math:`U` depends on :math:`n_c` and
+    :math:`\tilde{n}`, which change during the condensate evolution step.
 
     Args:
-        positions (torch.Tensor): Current positions, shape (N_test, 3).
-        momenta (torch.Tensor): Current momenta, shape (N_test, 3).
-        U_current (torch.Tensor): Mean-field potential at time t, (n1,n2,n3).
-        U_next (torch.Tensor): Mean-field potential at time t+dt, (n1,n2,n3).
-            Pass U_current here on the first call (predictor step); refine if
-            a second-order accurate scheme is needed.
-        n1, n2, n3 (int): Grid dimensions.
-        x_min (torch.Tensor): Lower box boundaries.
-        dx (torch.Tensor): Grid spacings.
-        p_grid (tuple): Momentum meshgrids for spectral gradients.
-        dtau (float): Dimensionless time step ω_ho · dt.
+        positions (torch.Tensor): Current positions, shape ``(N_test, 3)``.
+        momenta (torch.Tensor): Current momenta, shape ``(N_test, 3)``.
+        U_current (torch.Tensor): Mean-field potential at time :math:`t`, shape
+            ``(n1, n2, n3)``.
+        U_next (torch.Tensor): Mean-field potential at time
+            :math:`t + \Delta t`, shape ``(n1, n2, n3)``. Pass ``U_current``
+            here on the first call (predictor step); refine it if a
+            second-order accurate scheme is needed.
+        n1 (int): Number of grid points along the first axis.
+        n2 (int): Number of grid points along the second axis.
+        n3 (int): Number of grid points along the third axis.
+        x_min (torch.Tensor): Lower box boundaries, shape ``(3,)``.
+        dx (torch.Tensor): Grid spacings per axis, shape ``(3,)``.
+        p_grid (tuple): Momentum meshgrids ``(px, py, pz)`` for the spectral
+            gradients.
+        dtau (float): Dimensionless time step
+            :math:`\omega_\mathrm{ho} \Delta t`.
         device (torch.device): Computation device.
 
     Returns:
-        new_positions (torch.Tensor): Shape (N_test, 3).
-        new_momenta  (torch.Tensor): Shape (N_test, 3).
+        tuple: The pair ``(new_positions, new_momenta)``, each a
+        ``torch.Tensor`` of shape ``(N_test, 3)``.
     """
     # Step 1 & 2: half momentum step with current forces
     F_current = compute_particle_forces(
@@ -138,17 +161,23 @@ def advance_particles_leapfrog(
 
 
 # ---------------------------------------------------------------------------
-# C_12: stochastic condensate ↔ thermal exchange
+# C_12: stochastic condensate <-> thermal exchange
 # ---------------------------------------------------------------------------
 
 def _stochastic_round(value: float) -> int:
-    """
+    r"""
     Round to a whole number of test particles without bias.
 
     A transfer of, say, 2.3 particles becomes 2 particles 70% of the time and 3
     the other 30%, so the *expected* count is exactly 2.3. Always rounding the
     same way would bias every step in one direction, which is precisely the
     systematic drift this module has to avoid.
+
+    Args:
+        value (float): Non-negative real number of test particles to round.
+
+    Returns:
+        int: A whole number of particles whose expectation value is ``value``.
     """
     base = int(math.floor(value))
     frac = value - base
@@ -175,66 +204,87 @@ def apply_c12_collisions(
     particle_weight: float,
     atoms_gained_by_condensate: float,
 ) -> Tuple[torch.Tensor, torch.Tensor, float]:
-    """
-    Move atoms between the thermal cloud and the condensate, conserving the total.
+    r"""
+    Move atoms between the thermal cloud and the condensate, conserving the
+    total.
 
-    The transfer size is whatever the condensate actually did
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    The condensate's own equation already carries the mean C_12 exchange, as
-    the source term R(r) = 2 gamma_12 [mu - V_eff] in the modified GPE. The
-    number of atoms leaving the cloud is therefore not a free rate to be
-    modelled a second time here: it is fixed by the norm the condensate just
-    gained or lost, which the caller measures across the split step and passes
-    in as ``atoms_gained_by_condensate``.
+    **The transfer size is whatever the condensate actually did.** The
+    condensate's own equation already carries the mean :math:`C_{12}` exchange,
+    as the source term
+    :math:`R(\mathbf{r}) = 2 \gamma_{12} [\mu - V_\mathrm{eff}]` in the
+    modified GPE. The number of atoms leaving the cloud is therefore not a free
+    rate to be modelled a second time here: it is fixed by the norm the
+    condensate just gained or lost, which the caller measures across the split
+    step and passes in as ``atoms_gained_by_condensate``.
 
     Deriving the two sides independently is what let them drift apart. The
-    emission rate ``gamma_12 n_c (V_eff - mu)`` is half the ``|R| n_c`` the
-    condensate sheds, and absorption was keyed on the particle energy ``eps``
-    rather than on ``V_eff``, so the books never balanced. Total atom number
-    now closes by construction, to within the single test particle that
-    discreteness allows in any one step -- and that residual is unbiased, see
-    :func:`_stochastic_round`.
+    emission rate :math:`\gamma_{12} n_c (V_\mathrm{eff} - \mu)` is half the
+    :math:`\lvert R \rvert n_c` the condensate sheds, and absorption was keyed
+    on the particle energy :math:`\epsilon` rather than on
+    :math:`V_\mathrm{eff}`, so the books never balanced. Total atom number now
+    closes by construction, to within the single test particle that
+    discreteness allows in any one step, and that residual is unbiased (see
+    :func:`_stochastic_round`).
 
-    The physical rates still choose *which* atoms move
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    They set the sampling distribution rather than the magnitude:
+    **The physical rates still choose which atoms move.** They set the sampling
+    distribution rather than the magnitude:
 
-    - Absorption (cloud -> condensate) favours particles energetically ready to
-      join it, with weight ``gamma_12 n_c(r) max(0, mu - eps)`` where
-      ``eps = p^2/2 + U(r)``.
-    - Emission (condensate -> cloud) favours cells where the condensate is
-      unbound, with weight ``gamma_12 n_c(r) max(0, V_eff(r) - mu)``.
+    - Absorption (cloud to condensate) favours particles energetically ready to
+      join it, with weight
 
-    Emitted particles get Maxwell-Boltzmann momenta at ``kT``, resampled so
-    ``eps > mu`` and they genuinely belong to the thermal cloud.
+      .. math::
+
+          w_\mathrm{abs} = \gamma_{12}\, n_c(\mathbf{r})\,
+              \max\bigl(0,\, \mu - \epsilon\bigr),
+          \qquad \epsilon = \tfrac{1}{2} p^{2} + U(\mathbf{r}).
+
+    - Emission (condensate to cloud) favours cells where the condensate is
+      unbound, with weight
+
+      .. math::
+
+          w_\mathrm{em} = \gamma_{12}\, n_c(\mathbf{r})\,
+              \max\bigl(0,\, V_\mathrm{eff}(\mathbf{r}) - \mu\bigr).
+
+    Emitted particles are given Maxwell-Boltzmann momenta at ``kT``, resampled
+    until :math:`\epsilon > \mu` so that they genuinely belong to the thermal
+    cloud.
 
     Args:
-        positions (torch.Tensor): Particle positions, shape (N_test, 3).
-        momenta (torch.Tensor): Particle momenta, shape (N_test, 3).
-        U (torch.Tensor): Mean-field potential U(r), shape (n1, n2, n3).
-        n_c (torch.Tensor): Condensate density |psi|^2, shape (n1, n2, n3).
-        mu (float): Condensate chemical potential (hbar omega_ho units).
-        gamma_12 (float): Dimensionless C_12 coupling rate.
-        dtau (float): Dimensionless time step. Retained for signature stability;
-            the transfer size now comes from the measured norm change.
-        n1, n2, n3 (int): Grid dimensions.
-        x_min (torch.Tensor): Lower box boundaries.
-        dx (torch.Tensor): Grid spacings.
-        kT (float): Dimensionless temperature k_B T / (hbar omega_ho).
+        positions (torch.Tensor): Particle positions, shape ``(N_test, 3)``.
+        momenta (torch.Tensor): Particle momenta, shape ``(N_test, 3)``.
+        U (torch.Tensor): Mean-field potential :math:`U(\mathbf{r})`, shape
+            ``(n1, n2, n3)``.
+        n_c (torch.Tensor): Condensate density
+            :math:`\lvert \psi \rvert^{2}`, shape ``(n1, n2, n3)``.
+        mu (float): Condensate chemical potential :math:`\mu`, in units of
+            :math:`\hbar \omega_\mathrm{ho}`.
+        gamma_12 (float): Dimensionless :math:`C_{12}` coupling rate
+            :math:`\gamma_{12}`.
+        dtau (float): Dimensionless time step. Retained for signature
+            stability; the transfer size now comes from the measured norm
+            change.
+        n1 (int): Number of grid points along the first axis.
+        n2 (int): Number of grid points along the second axis.
+        n3 (int): Number of grid points along the third axis.
+        x_min (torch.Tensor): Lower box boundaries, shape ``(3,)``.
+        dx (torch.Tensor): Grid spacings per axis, shape ``(3,)``.
+        kT (float): Dimensionless temperature
+            :math:`k_B T / (\hbar \omega_\mathrm{ho})`.
         device (torch.device): Computation device.
         particle_weight (float): Atoms represented by one test particle, in the
             condensate normalisation.
-        atoms_gained_by_condensate (float): Net atoms the condensate gained over
-            the step. Positive removes that many atoms from the cloud, negative
-            adds them.
+        atoms_gained_by_condensate (float): Net atoms the condensate gained
+            over the step. A positive value removes that many atoms from the
+            cloud, a negative value adds them.
 
     Returns:
         tuple: ``(new_positions, new_momenta, atoms_transferred)`` — the
         updated particle arrays, and the atoms actually handed to the
-        condensate (negative if the cloud received them). The transfer can
-        fall short of the request when the cloud does not hold enough atoms
-        to give; the caller reconciles the condensate against this figure, so
-        the total is conserved even when the exchange saturates.
+        condensate (negative if the cloud received them). The transfer can fall
+        short of the request when the cloud does not hold enough atoms to give;
+        the caller reconciles the condensate against this figure, so the total
+        is conserved even when the exchange saturates.
     """
     if particle_weight <= 0.0 or atoms_gained_by_condensate == 0.0:
         return positions, momenta, 0.0
@@ -330,7 +380,7 @@ def apply_c12_collisions(
 
 
 # ---------------------------------------------------------------------------
-# C_22: thermal–thermal scattering (stub)
+# C_22: thermal-thermal scattering (stub)
 # ---------------------------------------------------------------------------
 
 def apply_c22_collisions(
@@ -340,40 +390,39 @@ def apply_c22_collisions(
     dtau: float,
     device: torch.device,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Apply C_22 thermal–thermal scattering collisions (stub).
+    r"""
+    Apply :math:`C_{22}` thermal-thermal scattering collisions (stub).
 
-    C_22 is the Boltzmann collision integral for two thermal atoms scattering
-    off each other.  It conserves total particle number and total momentum
-    but redistributes energy between particles, driving the thermal cloud toward
-    a local Maxwell-Boltzmann distribution.
+    :math:`C_{22}` is the Boltzmann collision integral for two thermal atoms
+    scattering off each other. It conserves total particle number and total
+    momentum but redistributes energy between particles, driving the thermal
+    cloud towards a local Maxwell-Boltzmann distribution.
 
-    The full C_22 requires evaluating a 6-dimensional collision integral for
-    every pair of particles — computationally expensive and typically implemented
-    via:
+    The full :math:`C_{22}` requires evaluating a six-dimensional collision
+    integral for every pair of particles, which is computationally expensive
+    and typically implemented either with Bird's direct simulation Monte Carlo
+    (DSMC) algorithm, or with a mean-free-path relaxation-time approximation
+    (BGK model).
 
-      - Bird's direct simulation Monte Carlo (DSMC) algorithm, or
-      - a mean-free-path relaxation-time approximation (BGK model).
+    This stub is a placeholder: it returns the inputs unchanged. Implement one
+    of the above schemes here when needed.
 
-    This stub is a placeholder.  It returns the inputs unchanged and logs a
-    warning.  Implement one of the above schemes here when needed.
-
-    Physical significance of C_22:
-        Without C_22, the thermal cloud thermalises only through C_12 (coupling
-        to the condensate).  For most BEC dynamics near equilibrium this is
-        sufficient.  C_22 matters when the thermal cloud is driven far from
-        equilibrium, e.g. during rapid evaporative cooling or quenches.
+    Note:
+        Without :math:`C_{22}`, the thermal cloud thermalises only through
+        :math:`C_{12}`, i.e. through its coupling to the condensate. For most
+        BEC dynamics near equilibrium that is sufficient. :math:`C_{22}`
+        matters when the thermal cloud is driven far from equilibrium, for
+        example during rapid evaporative cooling or quenches.
 
     Args:
-        positions (torch.Tensor): Particle positions, shape (N_test, 3).
-        momenta (torch.Tensor): Particle momenta, shape (N_test, 3).
-        kT (float): Dimensionless temperature (for future relaxation-time use).
-        dtau (float): Dimensionless time step (for future DSMC use).
+        positions (torch.Tensor): Particle positions, shape ``(N_test, 3)``.
+        momenta (torch.Tensor): Particle momenta, shape ``(N_test, 3)``.
+        kT (float): Dimensionless temperature, for future relaxation-time use.
+        dtau (float): Dimensionless time step, for future DSMC use.
         device (torch.device): Computation device.
 
     Returns:
-        positions (torch.Tensor): Unchanged.
-        momenta  (torch.Tensor): Unchanged.
+        tuple: The pair ``(positions, momenta)``, unchanged.
     """
     # C_22 not yet implemented — thermal cloud thermalises via C_12 only.
     return positions, momenta
