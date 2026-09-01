@@ -66,7 +66,7 @@ where:
 - `g = 4πħ²a_s/m` is the interaction strength
 - `a_s` is the s-wave scattering length
 
-An optional three-body loss term is supported:
+An optional three-body loss term is supported, and is applied by every model (`BEC`, `BaseBEC`, `FiniteTempBEC`) when `k3` is non-zero:
 
 ```
 i ħ ∂ψ/∂t = [ -ħ²∇²/2m + V_ext + g|ψ|² + i·k3·|ψ|⁴ ] ψ
@@ -213,6 +213,16 @@ Simulations are driven by two JSON files.
 | `three_body_loss` | `true` / `false` |
 | `k3` | Three-body loss coefficient |
 
+
+**How each model applies it.** `BEC` and `BaseBEC` fold the rate into `utot` as an imaginary part —
+exact there, because `exp(-i·Δτ/2·(V + iL))` splits cleanly into a unitary phase times the amplitude
+decay `exp(Δτ·L/2)`. `FiniteTempBEC` applies it as a **separate** Strang-split operator either side of
+`sgpe_step` instead: everything placed in `utot` is multiplied by the SGPE's `(i + γ)` prefactor,
+which would give the right decay times a spurious phase of order `γ·k3·|ψ|⁴·Δτ`. The loss is a
+distinct channel from the reservoir coupling — γ moves atoms between condensate and thermal cloud,
+three-body recombination ejects them from the trap — so a finite-temperature run generally wants both.
+`ZNGBEC` does not apply it; it overrides the loop with its own two-component dynamics.
+
 #### Model selection
 | Key | Description |
 |-----|-------------|
@@ -233,6 +243,17 @@ Simulations are driven by two JSON files.
 | `gamma_12` | `0.1` | C_12 coupling rate between condensate and thermal cloud. γ_12=0 fully decouples them. |
 | `chemical_potential` | `null` | Reservoir μ. If null, computed from the ground state. |
 | `enable_c22` | `false` | Enable C_22 thermal–thermal collisions (currently a no-op stub). |
+| `zng_condensate_exchange` | `false` | Whether the condensate may actually trade atoms with the thermal cloud. `false` renormalises the condensate every step, pinning its atom number (the original behaviour); `true` leaves the norm free so the source term `R` can grow and deplete it. |
+| `zng_thermal_fraction_mode` | `"temperature"` | Which convention fixes the thermal fraction `f`. `"temperature"` derives it from the ideal-Bose law for a 3-D harmonic trap, `f = (T/T_c)³ = T³·ζ(3)/N`, saturating at 1 above `T_c`. `"explicit"` reads it from `zng_thermal_fraction` — use that for a non-harmonic trap, to match a measured condensate fraction, or to sweep `f` independently of `T`. |
+| `zng_thermal_fraction` | `null` | Thermal fraction in `[0, 1]`. Required when `zng_thermal_fraction_mode = "explicit"`, ignored otherwise. |
+
+**Why the thermal fraction matters.** The condensate is normalised so `∫|ψ|² dV = 1` stands for the
+whole sample, so the cloud has to be measured on that same scale. Each test particle therefore carries
+a weight `f / n_test`, making `∫ñ dV = f` while the condensate is scaled to hold `1 − f`. Without that
+weight `ñ` integrates to the raw test-particle count, so every mean-field term mixing `n_c` and `ñ` —
+and hence the C_12 exchange rate itself — scales with `n_test`, which is a convergence knob rather
+than physics. With it, the peak ratio `2u·ñ / u·n_c` stays put (≈0.31–0.37) as `n_test` goes 100 →
+10000, where before it ran 172 → 11479.
 
 #### Multi-simulation sweeps
 Any parameter can be passed as a list to automatically generate a simulation for each value. `get_simulation_combinations()` builds the Cartesian product of all list-valued parameters.
@@ -245,7 +266,7 @@ Any parameter can be passed as a list to automatically generate a simulation for
 
 Base class exposing the core numerical operators. All methods accept and return PyTorch tensors.
 
-#### `init_grid(x_min, x_max, dx, dp, w, n1, n2, n3, device) -> tuple`
+#### `init_grid(x_min, dx, dp, n1, n2, n3, device) -> tuple`
 Create spatial and momentum grids.  
 Returns `(x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid)` where each `xi` and `pi` are 1-D tensors, `p_sq` is the 3-D squared-momentum operator, `space_grid` is a 3-tuple of 3-D real-space meshgrids, and `p_grid` is a 3-tuple of 3-D momentum meshgrids.
 
@@ -258,20 +279,23 @@ Apply the full momentum-space step via FFT: `ψ ← IFFT( FFT(ψ) · exp(-i · d
 #### `normalize(phi, d_x) -> Tensor`
 Normalize the wavefunction so `∫|ψ|² dV = 1`.
 
-#### `split_step_step(psi, utot, dtau, p_sq, d_x) -> Tensor`
-Execute one full Trotter-factorized split-step iteration (half-x, full-p, half-x, normalize).
+#### `split_step_step(psi, utot, dtau, p_sq, d_x, renormalise=False) -> Tensor`
+Execute one full Trotter-factorized split-step iteration (half-x, full-p, half-x).  
+The norm is **not** forced back to 1 by default: the propagator is unitary for a real `utot` (norm conserved to ~1e-14 over thousands of steps), and when `utot` is complex — three-body losses, absorbing potential — the norm is *meant* to decay. Pass `renormalise=True` only for a deliberately number-conserving lossy run.
 
 #### `extract_phase(psi) -> Tensor`
-Return `angle(ψ)` — the complex phase field.
+Return `angle(ψ)` — the complex phase field, wrapped to (-π, π] and finite at a node.  
+(The former `Im(log(ψ/√(|ψ|²)))` evaluated 0/0 wherever ψ = 0 — i.e. at a vortex core — and one NaN contaminates an entire array as soon as it passes through an FFT.)
 
 #### `update_phase(psi, phase) -> Tensor`
 Return `|ψ| · exp(i · phase)`.
 
 #### `mod_grad_psi(psi, p_axes) -> Tensor`
-Compute `|∇ψ|` spectrally, used in energy calculations.
+Compute `|∇ψ|` spectrally, used in energy calculations. Each component contributes `|∂_i ψ|² = Re² + Im²`, so the result is correct for complex (phase-carrying) states. `p_axes` may be 1-D momentum axes or full meshgrids.
 
-#### `calculate_energy_allocation(psi, Vext, p_grid, **params) -> dict`
-Return a dict with keys `kinetic`, `potential`, `interaction` (and `three_body` if enabled) as scalar tensors.
+#### `calculate_energy_allocation(psi, Vext, p_grid, d_x, **params) -> dict`
+Return a dict with keys `e_kin`, `e_pot`, `e_int`, `E_total` as scalar tensors, in units of ħ·ω_ho.  
+Every term is an integral, so each sum carries the cell volume `d_x` (ψ is normalised as `d_x·Σ|ψ|² = 1`); without it the energies scale with the grid spacing. A complex `Vext` contributes only its real part.
 
 #### `calculate_density_peak(psi) -> tuple`
 Return `(peak_density, (i, j, k))` — maximum of `|ψ|²` and its 3-D grid indices.
@@ -280,19 +304,21 @@ Return `(peak_density, (i, j, k))` — maximum of `|ψ|²` and its 3-D grid indi
 Compute the mean-field chemical potential `μ = ⟨ψ|H_mf|ψ⟩ = e_kin + e_pot + 2·e_int`.  
 Used by `FiniteTempBEC` and `ZNGBEC` to fix the grand-canonical reservoir potential when not supplied in config.
 
-#### `generate_thermal_noise(shape, gamma, kT, dtau, d_x, device) -> Tensor`
+#### `generate_thermal_noise(shape, gamma, kT, dtau, d_x, device, p_sq=None, e_cut=None) -> Tensor`
 Generate a complex Gaussian noise field for one SGPE time step satisfying the fluctuation-dissipation theorem.  
 Noise amplitude: `σ = √(γ · kT · dtau / d_x)`.  
-Only used when `temperature > 0`.
+Only used when `temperature > 0`.  
+Pass `p_sq` and `e_cut` to project the noise onto modes with `p²/2 ≤ e_cut` (the "P" of the projected SGPE); unprojected white noise heats every mode up to the grid Nyquist.
 
-#### `sgpe_step(psi, utot, mu, gamma, dtau, p_sq, d_x) -> Tensor`
+#### `sgpe_step(psi, utot, mu, gamma, dtau, p_sq, d_x, renormalise=False) -> Tensor`
 Perform one deterministic SGPE split-step with `(1 − iγ)` damping.  
 Replaces the standard unitary GPE propagator with a dissipative one:
 ```
 exp(−(i+γ) · dt · (H_mf − μ))
 ```
-Split-step sequence: real-space half-step → momentum full-step → real-space half-step → normalize.  
-Modes above μ are damped; modes below μ are amplified.
+Split-step sequence: real-space half-step → momentum full-step → real-space half-step.  
+Modes above μ are damped; modes below μ are amplified.  
+The norm is **not** reset: μ enters only as the constant shift `(H_mf − μ)`, so renormalising afterwards divides that factor straight back out and leaves μ with no effect on the dynamics at all. With the norm free, N(t) = N₀·‖ψ‖² and the reservoir sets the atom number through μ.
 
 ---
 
@@ -302,12 +328,18 @@ Modes above μ are damped; modes below μ are amplified.
 
 #### `create_vortices(vortices, x1, x2, x3, n1, n2, n3, device) -> Tensor`
 Build a vortex phase field.  
-`vortices` is a dict with keys `position_x`, `position_y`, `charge` (lists of equal length).  
-Returns a (n1, n2, n3) phase tensor.
+`vortices` is an array of shape `(3, n_vortices)` — rows are x positions, z positions, charges
+(positions are grid offsets from the centre).  
+Returns a real (n1, n2, n3) phase tensor, computed on the (n1, n3) plane and broadcast along y.
 
-#### `calculate_velocity2D(phase2D, p_grid) -> tuple`
-Compute the superfluid velocity field from the 2D phase via spectral differentiation.  
-Returns `(speed, angle)` — both (n1, n3) tensors.
+#### `calculate_velocity2D(psi, p_grid, density_floor=1e-12) -> tuple`
+Compute the in-plane superfluid velocity from the **wavefunction**, as `(speed, direction)`.  
+The plane is x–z, so the components are `v_x` and `v_z` (the two available axes for a 2-D field).  
+Takes ψ rather than its phase deliberately: `angle(ψ)` has a 2π branch cut out of every vortex core,
+and a spectral derivative of that discontinuity rings across the **whole** domain, not just near the
+cut. Measured against an analytic vortex–antivortex field, the phase route was off by 146% at the
+median (5383% worst); this one tracks the exact field to a few percent, converging as the box grows.
+Shares `GPELibrary.superfluid_velocity` with `calculate_velocity3D`, so the two always agree.
 
 #### `rms_radius(psi, center, space_grid) -> Tensor`
 Compute the root-mean-square radius of the density distribution relative to `center`.
@@ -319,8 +351,10 @@ Create a soliton mask: `f(r) = cos(α)·tanh(cos(α)·(r-r0)/w) + i·sin(α)`.
 #### `imprint_dark_soliton(psi, soliton_mask) -> Tensor`
 Return `ψ · f(r)`.
 
-#### `calculate_cross_section_line(psi, axis) -> Tensor`
-Integrate `|ψ|²` perpendicular to `axis`, returning a 1-D density profile.
+#### `calculate_cross_section_line(psi, axis=1) -> Tensor`
+Return a 1-D density profile running *along* `axis` through the centre of the grid, with the trivial
+y direction integrated out: `axis=1` → n(x), length n1; `axis=2` → n(z), length n3. Any other value
+raises `ValueError`.
 
 #### `repetitive_imprint(psi, repetitive_phase) -> Tensor`
 Multiply the current phase of `ψ` by the pre-computed `repetitive_phase`.
@@ -337,18 +371,24 @@ Generate the phase pattern of a circular vortex ring of given radius and charge.
 #### `create_vortex_lines(x1, x2, x3, n1, n2, n3, positions, charges, axis, device) -> Tensor`
 Generate phase patterns for multiple straight vortex lines parallel to `axis`.
 
-#### `column_density(psi, axis) -> Tensor`
-Integrate `|ψ|²` along the given axis, returning a 2-D projected density.
+#### `column_density(psi, axis, d_axis=1.0) -> Tensor`
+Integrate `|ψ|²` along the given axis, returning a 2-D projected density. Pass `d_axis` (the grid spacing along that axis) for a true line integral; the default returns the bare sum.
 
 #### `cross_section_plane(psi, axis, index) -> Tensor`
 Return a 2-D slice of `|ψ|²` orthogonal to `axis` at grid index `index`.
 
-#### `calculate_velocity3D(psi, p_grid) -> tuple`
-Compute the 3-D superfluid velocity `v_i = Im(ψ* ∂_i ψ) / |ψ|²` spectrally.  
-Returns `(speed, angle)` — both 3-D tensors.
+#### `superfluid_velocity(psi, p_axes, components=None, density_floor=1e-12) -> list`
+`v_i = Im(ψ* ∂_i ψ) / |ψ|²` for the requested components — the shared implementation behind both
+velocity helpers. Equals `∂_i θ` for the *unwrapped* phase, but computed from ψ, which is
+single-valued, so no branch cut ever enters.
 
-#### `angular_momentum(psi, space_grid, p_grid, component) -> Tensor`
-Compute `⟨L_component⟩` where `component` ∈ {1, 2, 3} or {'x','y','z'}.
+#### `calculate_velocity3D(psi, p_grid, density_floor=1e-12) -> tuple`
+Compute the 3-D superfluid velocity `v_i = Im(ψ* ∂_i ψ) / |ψ|²` spectrally.  
+Returns `(v1, v2, v3)` — three 3-D tensors. The velocity is zeroed where the density falls below
+`density_floor` *relative to the peak*, so the dilute tail cannot produce meaningless huge values.
+
+#### `angular_momentum(psi, space_grid, p_grid, component, d_x) -> Tensor`
+Compute `⟨L_component⟩` in units of ħ, where `component` ∈ {1, 2, 3}. The expectation value is an integral, so it carries the cell volume `d_x`.
 
 ---
 
@@ -369,18 +409,21 @@ Wraps a user-supplied callable `operator(psi, **kwargs)` so it conforms to the `
 
 ### `ground_state.GroundState`
 
-#### `find_ground_state(sim_params, system, file_name, device) -> Tensor`
+#### `find_ground_state(sim_params, system, file_name, device, max_iterations=200000) -> Tensor`
 Find the ground-state wavefunction.  
 - If a saved file exists at `file_name`, loads it.  
-- Otherwise runs imaginary-time steepest descent to convergence (`|gradient| < 1e-5` or negligible energy change).  
+- Otherwise runs imaginary-time steepest descent to convergence (`|gradient| < 1e-5` or negligible energy change), seeded with a Thomas-Fermi profile.  
+`max_iterations` caps the descent so a state that never reaches tolerance cannot loop forever; the interaction strength is taken from `simulation_parameters["u"]` when present.  
 Returns the normalized ground-state wavefunction as a complex tensor.
 
+The cylindrical counterpart is `ground_state_cylindrical.CylindricalGroundState`, with the same signature and semantics but the `r dr dφ dz` volume element throughout.
+
 #### `steepest_descent(psi, dtau, p_sq, uext, d_x, u) -> tuple`
-Single imaginary-time step.  
-Returns `(psi_new, energy, tolerance, chemical_potential)`.
+Single imaginary-time step `ψ ← ψ − Δτ(H − μ)ψ`, renormalised.  
+Returns `(psi_new, energy, tolerance, chemical_potential)`. μ is taken as the **real part** of `⟨ψ|H|ψ⟩` — using its modulus flips the sign of a negative μ (any trap with a negative energy offset) and makes the residual grow instead of shrink.
 
 #### `read_ground_state(data, n1, n2, n3) -> Tensor`
-Reconstruct a complex wavefunction tensor from saved CSV data.
+Reconstruct a complex wavefunction tensor from saved CSV data. Each row is `(real,imag)` for one grid point in row-major order. Raises `ValueError` if the file's point count does not match the requested grid.
 
 ---
 
@@ -625,6 +668,17 @@ ZNG coupled evolution. Each iteration:
 8. C_22 thermal–thermal collisions (stub, enabled via `enable_c22`)
 9. Update ñ from new particle positions (cloud-in-cell)
 
+**Atom-number conservation.** The condensate's source term `R` and the C_12 Monte-Carlo transfer are
+two views of the same exchange, so they are no longer modelled independently — that let them disagree
+(the emission rate is half of `|R|·n_c`, and absorption was keyed on the particle energy rather than
+`V_eff`), and the total number drifted steadily. The loop now measures the condensate's norm change
+across the split step, hands that figure to C_12 as the number of atoms to move, and then scales the
+condensate to whatever C_12 actually managed — which can be less, since the cloud may not hold enough
+atoms to give. The physical rates still choose *which* particles move and *where*, just not how many.
+Total number is conserved to roundoff (~1e-15 over hundreds of steps, no longer accumulating), and
+the same mechanism doubles as the pin when `zng_condensate_exchange` is off: zero transfer means the
+condensate is scaled back to the number it began the step with, preserving the `1 − f` / `f` split.
+
 #### ZNG helper modules
 
 | Module | Key functions |
@@ -686,12 +740,12 @@ All I/O functions that write data use row-major (C-order) NumPy dumps compatible
 
 | Function | Description |
 |----------|-------------|
-| `write_psi(file_name, psi, n1, n2, n3)` | Serialize full complex wavefunction |
+| `write_psi(file_name, psi, n1, n2, n3)` | Serialize full complex wavefunction, one `(real,imag)` line per point (vectorised; `%.17g` round-trips float64 exactly) |
 | `write_data(psi, count, x1, x3, ...)` | Write column-density snapshot (`R-###-cd.dat`) |
 | `write_phase(phase, count, ...)` | Write 3-D phase field |
 | `write_phase2D(phase, count, ...)` | Write 2-D phase field |
 | `read_phase_file_2D(filename, n1, n3)` | Load 2-D phase tensor from file |
-| `write_velocity2D(phase, count, ...)` | Velocity field snapshot |
+| `write_velocity2D(psi, count, ...)` | Velocity field snapshot (takes ψ, not the phase) |
 | `write_rms(rms_meas, SimulationName)` | RMS radius time series → CSV |
 | `write_energy_terms(energies, filename)` | Energy breakdown → CSV |
 | `save_figure_phase(phase, frame)` | Phase field → PNG |

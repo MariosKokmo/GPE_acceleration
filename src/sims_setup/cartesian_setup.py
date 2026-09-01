@@ -125,6 +125,15 @@ def get_simulation_parameters_cartesian(config_file_path):
     n_test_particles = int(sim_params.get("n_test_particles", 10_000))
     gamma_12 = float(sim_params.get("gamma_12", 0.1))
     enable_c22 = bool(sim_params.get("enable_c22", False))
+    # Whether the condensate may actually exchange atoms with the thermal
+    # cloud (free norm) or is pinned to a fixed number after every step.
+    zng_condensate_exchange = bool(sim_params.get("zng_condensate_exchange", False))
+    # How the thermal fraction is fixed: "temperature" derives it from T via
+    # the ideal-Bose result, "explicit" takes zng_thermal_fraction directly.
+    zng_thermal_fraction_mode = str(sim_params.get("zng_thermal_fraction_mode", "temperature"))
+    zng_thermal_fraction = sim_params.get("zng_thermal_fraction", None)
+    if zng_thermal_fraction is not None:
+        zng_thermal_fraction = float(zng_thermal_fraction)
 
     # Shared finite-temperature parameter (used by both SGPE and ZNG)
     # None means "compute from the ground-state wavefunction at runtime"
@@ -196,6 +205,9 @@ def get_simulation_parameters_cartesian(config_file_path):
         "gamma_12": gamma_12,
         "chemical_potential": chemical_potential,
         "enable_c22": enable_c22,
+        "zng_condensate_exchange": zng_condensate_exchange,
+        "zng_thermal_fraction_mode": zng_thermal_fraction_mode,
+        "zng_thermal_fraction": zng_thermal_fraction,
     }
     
     # Carry dark-soliton settings through unchanged so the simulation builder

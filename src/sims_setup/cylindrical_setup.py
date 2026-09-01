@@ -51,13 +51,17 @@ def get_simulation_parameters_cylindrical(config_file_path):
 
     Derived quantities
     ------------------
-    a_ho      : harmonic oscillator length √(ħ/m ω_ho) in metres.
-    omega_ho  : geometric mean (ωr² ωz)^(1/3)  [rad/s].
-    w         : normalised frequencies [ωr/ω_ho, ωz/ω_ho].
-    r_max, z_min, z_max : grid bounds scaled to dimensionless units (/ a_ho).
-    dr, dphi, dz : grid spacings in dimensionless units.
-    d_x       : dr · dphi · dz  (non-r-weighted part of the cylindrical
-                volume element; the r-weight is applied inside the library).
+
+    ::
+
+        a_ho      : harmonic oscillator length √(ħ/m ω_ho) in metres.
+        omega_ho  : geometric mean (ωr² ωz)^(1/3)  [rad/s].
+        w         : normalised frequencies [ωr/ω_ho, ωz/ω_ho].
+        r_max, z_min, z_max : grid bounds scaled to dimensionless units.
+        dr, dphi, dz : grid spacings in dimensionless units.
+        d_x       : dr · dphi · dz, the non-r-weighted part of the
+                    cylindrical volume element; the r-weight is applied
+                    inside the library.
 
     Parameters
     ----------
@@ -188,6 +192,15 @@ def get_simulation_parameters_cylindrical(config_file_path):
     n_test_particles     = int(sim_params.get("n_test_particles", 10_000))
     gamma_12             = float(sim_params.get("gamma_12", 0.1))
     enable_c22           = bool(sim_params.get("enable_c22", False))
+    # Whether the condensate may actually exchange atoms with the thermal
+    # cloud (free norm) or is pinned to a fixed number after every step.
+    zng_condensate_exchange = bool(sim_params.get("zng_condensate_exchange", False))
+    # How the thermal fraction is fixed: "temperature" derives it from T via
+    # the ideal-Bose result, "explicit" takes zng_thermal_fraction directly.
+    zng_thermal_fraction_mode = str(sim_params.get("zng_thermal_fraction_mode", "temperature"))
+    zng_thermal_fraction = sim_params.get("zng_thermal_fraction", None)
+    if zng_thermal_fraction is not None:
+        zng_thermal_fraction = float(zng_thermal_fraction)
     _mu_raw              = sim_params.get("chemical_potential", None)
     chemical_potential   = float(_mu_raw) if _mu_raw is not None else None
 
@@ -254,6 +267,9 @@ def get_simulation_parameters_cylindrical(config_file_path):
         "gamma_12":             gamma_12,
         "chemical_potential":   chemical_potential,
         "enable_c22":           enable_c22,
+        "zng_condensate_exchange": zng_condensate_exchange,
+        "zng_thermal_fraction_mode": zng_thermal_fraction_mode,
+        "zng_thermal_fraction": zng_thermal_fraction,
     }
 
     # Carry dark-soliton settings through unchanged so the simulation builder

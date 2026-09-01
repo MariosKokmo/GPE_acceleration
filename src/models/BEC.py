@@ -505,7 +505,7 @@ class BEC:
             rms = gpe2d.rms_radius(self.psi, self.system.center, self.system.space_grid)
             self.rms_measurements[count] = rms
             self.cross_line[count, :] = gpe2d.calculate_cross_section_line(self.psi)
-            self.energies.append(gpe.calculate_energy_allocation(self.psi, self.uext, (self.p1, self.p2, self.p3), u=self.u))
+            self.energies.append(gpe.calculate_energy_allocation(self.psi, self.uext, (self.p1, self.p2, self.p3), self.d_x, u=self.u))
             
             self.logger.info(f"t = {t / self.omega_ho}")
         except Exception as e:

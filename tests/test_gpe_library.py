@@ -31,7 +31,7 @@ class TestModGradPsi(unittest.TestCase):
     def setup_grids(self, dim):
         """Return lists of maximum, minimum and length for every axis of the grid"""
         x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid = gpe.init_grid(self.x_min, \
-                        self.x_max, dx=self.dx, dp=self.dp, w=0, \
+                        dx=self.dx, dp=self.dp, \
                         n1=self.N1, n2=self.N2, n3=self.N3, \
                             device='cpu')
         # init_grid now returns the 1-D momentum axes directly (p1, p2, p3),
@@ -57,7 +57,8 @@ class TestModGradPsi(unittest.TestCase):
         space_grid, p_axes, n = self.setup_grids(dim=1)
         input = torch.sin(space_grid[0])
         grad = gpe.mod_grad_psi(input, p_axes)
-        result = torch.cos(space_grid[0])
+        # mod_grad_psi returns |∇ψ| in every dimension, so compare magnitudes
+        result = torch.abs(torch.cos(space_grid[0]))
         assert input.shape == result.shape
         assert grad.shape == result.shape, f"grad shape is {grad.shape} and expected result {result.shape}"
         error = np.linalg.norm(grad[n//3:-n//3] - result[n//3:-n//3])/np.linalg.norm(result[n//3:-n//3])
@@ -67,7 +68,7 @@ class TestModGradPsi(unittest.TestCase):
         space_grid, p_axes, n = self.setup_grids(dim=1)
         input = torch.exp(-(space_grid[0]**2)/10)
         grad = gpe.mod_grad_psi(input, p_axes)
-        result = -space_grid[0]/5 * input
+        result = torch.abs(-space_grid[0]/5 * input)
         error = np.linalg.norm(grad[n//3:-n//3] - result[n//3:-n//3])/np.linalg.norm(result[n//3:-n//3])
         self.assertLessEqual(error, self.error_tol, msg=f"the error is not small enough")
     
@@ -75,13 +76,13 @@ class TestModGradPsi(unittest.TestCase):
         space_grid, p_axes, n = self.setup_grids(dim=1)
         input = torch.sin(space_grid[0])*torch.exp(-space_grid[0]**2/100)
         grad = gpe.mod_grad_psi(input, p_axes)
-        result = (torch.cos(space_grid[0])- (2 * space_grid[0] * torch.sin(space_grid[0])/100)) * torch.exp(-space_grid[0]**2/100)
+        result = torch.abs((torch.cos(space_grid[0])- (2 * space_grid[0] * torch.sin(space_grid[0])/100)) * torch.exp(-space_grid[0]**2/100))
         error = np.linalg.norm(grad[n//3:-n//3] - result[n//3:-n//3])/np.linalg.norm(result[n//3:-n//3])
         self.assertLessEqual(error, self.error_tol, msg=f"the error is not small enough")
 
     def test_tensor_flat_2D(self):
         grid, p_axes, n = self.setup_grids(dim=2)
-        space_grid = torch.meshgrid(grid[0], grid[1])
+        space_grid = torch.meshgrid(grid[0], grid[1], indexing='ij')
         input = torch.ones_like(space_grid[0])
         result = torch.zeros_like(space_grid[0])
         assert input.shape == result.shape
@@ -92,7 +93,7 @@ class TestModGradPsi(unittest.TestCase):
 
     def test_gaussian_2D(self):
         grid, p_axes, n = self.setup_grids(dim=2)
-        space_grid = torch.meshgrid(grid[0], grid[1])
+        space_grid = torch.meshgrid(grid[0], grid[1], indexing='ij')
         input = torch.exp(-(space_grid[0]**2 + space_grid[1]**2)/200)
         assert len(p_axes) == 2
         grad = gpe.mod_grad_psi(input, p_axes)
@@ -105,7 +106,7 @@ class TestModGradPsi(unittest.TestCase):
 
     def test_tensor_flat_3D(self):
         grid, p_axes, n = self.setup_grids(dim=3)
-        space_grid = torch.meshgrid(grid[0], grid[1], grid[2])
+        space_grid = torch.meshgrid(grid[0], grid[1], grid[2], indexing='ij')
         input = torch.ones_like(space_grid[0])
         grad = gpe.mod_grad_psi(input, p_axes)
         result = torch.zeros_like(space_grid[0])
@@ -114,7 +115,7 @@ class TestModGradPsi(unittest.TestCase):
 
     def test_gaussian_3D(self):
         grid, p_axes, n = self.setup_grids(dim=3)
-        space_grid = torch.meshgrid(grid[0], grid[1], grid[2])
+        space_grid = torch.meshgrid(grid[0], grid[1], grid[2], indexing='ij')
         input = torch.exp(-(space_grid[0]**2 + space_grid[1]**2 + space_grid[2]**2)/200)
         grad = gpe.mod_grad_psi(input, p_axes)
         result = torch.sqrt(space_grid[0]**2 + space_grid[1]**2 + space_grid[2]**2)/100 * input
@@ -138,7 +139,7 @@ class TestInitGrid(unittest.TestCase):
     
     def test_init_grid(self):
         x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid = gpe.init_grid(self.x_min, \
-                                                                         self.x_max, dx=self.dx, dp=self.dp, w=0, \
+                                                                         dx=self.dx, dp=self.dp, \
                                                                             n1=self.N1, n2=self.N1, n3=self.N3, \
                                                                                 device='cpu')
         assert len(x1) == self.N1
@@ -169,7 +170,7 @@ class TestCreateVortices(unittest.TestCase):
         self.device = 'cpu'
         self.vortices = np.array([[0], [0], [1]])  # Single vortex at the origin with charge 1
         self.x1, self.x2, self.x3, _, _, _, _, _, _ = gpe.init_grid(
-            self.x_min, self.x_max, self.dx, self.dp, 0, self.N1, self.N2, self.N3, self.device
+            self.x_min, self.dx, self.dp, self.N1, self.N2, self.N3, self.device
         )
 
     def test_create_vortices_single(self):
@@ -279,7 +280,7 @@ class TestCalculateDensityPeak(unittest.TestCase):
         x = torch.arange(11, dtype=torch.float64)
         y = torch.arange(11, dtype=torch.float64)
         z = torch.arange(11, dtype=torch.float64)
-        X, Y, Z = torch.meshgrid(x, y, z)
+        X, Y, Z = torch.meshgrid(x, y, z, indexing='ij')
         
         # Gaussian centered at (5, 5, 5)
         psi = torch.exp(-((X - 5)**2 + (Y - 5)**2 + (Z - 5)**2) / 2.0)
@@ -392,15 +393,14 @@ class TestGPE3DLibrary(unittest.TestCase):
             cls.p_grid,
         ) = gpe.init_grid(
             cls.x_min,
-            cls.x_max,
             dx=cls.dx,
             dp=cls.dp,
-            w=0,
             n1=cls.n1,
             n2=cls.n2,
             n3=cls.n3,
             device="cpu",
         )
+        cls.d_x = cls.dx[0] * cls.dx[1] * cls.dx[2]
 
     def test_create_vortex_ring_shape_and_finite(self):
         phase = gpe3d.create_vortex_ring(
@@ -552,9 +552,9 @@ class TestGPE3DLibrary(unittest.TestCase):
         psi_real = torch.exp(-(gx**2 + gy**2 + gz**2) / 3.0)
         psi = gpe.normalize(psi_real.to(torch.cdouble), d_x=np.prod(self.dx))
 
-        l1 = gpe3d.angular_momentum(psi, self.space_grid, self.p_grid, component=1)
-        l2 = gpe3d.angular_momentum(psi, self.space_grid, self.p_grid, component=2)
-        l3 = gpe3d.angular_momentum(psi, self.space_grid, self.p_grid, component=3)
+        l1 = gpe3d.angular_momentum(psi, self.space_grid, self.p_grid, component=1, d_x=self.d_x)
+        l2 = gpe3d.angular_momentum(psi, self.space_grid, self.p_grid, component=2, d_x=self.d_x)
+        l3 = gpe3d.angular_momentum(psi, self.space_grid, self.p_grid, component=3, d_x=self.d_x)
 
         self.assertAlmostEqual(l1.item(), 0.0, places=6)
         self.assertAlmostEqual(l2.item(), 0.0, places=6)
@@ -563,7 +563,7 @@ class TestGPE3DLibrary(unittest.TestCase):
     def test_angular_momentum_invalid_component_raises(self):
         psi = torch.ones((self.n1, self.n2, self.n3), dtype=torch.cdouble)
         with self.assertRaises(ValueError):
-            gpe3d.angular_momentum(psi, self.space_grid, self.p_grid, component=0)
+            gpe3d.angular_momentum(psi, self.space_grid, self.p_grid, component=0, d_x=self.d_x)
 
 class TestDarkSoliton(unittest.TestCase):
     """Tests for dark soliton creation and imprinting."""

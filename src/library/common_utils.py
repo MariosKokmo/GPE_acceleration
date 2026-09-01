@@ -51,15 +51,21 @@ class CommonUtils:
         psi: torch.Tensor
     ) -> torch.Tensor:
         """
-        Extract the phase from the wavefunction.
+        Extract the phase from the wavefunction, wrapped to (-pi, pi].
+
+        Uses ``torch.angle``, which agrees exactly with the previous
+        ``Im(log(psi/sqrt(|psi|^2)))`` wherever psi is non-zero and, unlike it,
+        stays finite at a node. That form evaluated 0/0 at every point where
+        the density vanishes — precisely a vortex core — and a single NaN
+        contaminates the whole array as soon as it passes through an FFT.
 
         Args:
             psi (torch.Tensor): Wavefunction of the condensate.
 
         Returns:
-            torch.Tensor: Phase of the condensate.
+            torch.Tensor: Phase of the condensate (real-valued, 0 at a node).
         """
-        return torch.imag(torch.log(psi / torch.sqrt(torch.abs(psi) ** 2)))
+        return torch.angle(psi)
 
     @staticmethod
     def add_phase(

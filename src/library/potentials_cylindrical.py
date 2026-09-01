@@ -10,12 +10,15 @@ z   : z_min … z_max
 
 Expected ``kwargs`` keys
 ------------------------
-Grid_resolution : (n_r, n_phi, n_z)
-r_max           : outer radial boundary.
-z_min, z_max    : axial extent.
-w               : [wr, wz] or [wr, wr, wz] — radial/axial trap frequencies.
-                  For 2-element form w[0]=wr, w[1]=wz.
-                  For 3-element form w[0]=wr, w[2]=wz (middle element ignored).
+
+::
+
+    Grid_resolution : (n_r, n_phi, n_z)
+    r_max           : outer radial boundary.
+    z_min, z_max    : axial extent.
+    w               : [wr, wz] or [wr, wr, wz] — radial/axial trap frequencies.
+                      For 2-element form w[0]=wr, w[1]=wz.
+                      For 3-element form w[0]=wr, w[2]=wz (middle ignored).
 
 Optional absorber keys (same semantics as Cartesian)
 -----------------------------------------------------

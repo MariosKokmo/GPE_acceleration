@@ -65,8 +65,12 @@ class BaseBEC:
 
         if self._coord == "cylindrical":
             from src.library.gpe_cylindrical_library import GPECylindricalLibrary as _cyl
+            from src.library.gpe_cylindrical_library import GPE2DCylindricalLibrary as _cyl2d
             from src.library.ground_state_cylindrical import CylindricalGroundState as _cgs
             self._lib = _cyl
+            # Diagnostics (rms_radius, column densities) live on the 2-D
+            # subclass in both coordinate systems.
+            self._gpe2d_lib = _cyl2d
             self._gs_lib = _cgs
         elif self._coord == "cartesian":
             from src.library.gpe_library import GPELibrary as gpe
@@ -181,6 +185,29 @@ class BaseBEC:
         else:
             self.psi = self._lib.split_step_step(self.psi, utot, dtau, p_sq, d_x)
     
+    def _apply_three_body_loss(self, dtau: float) -> None:
+        """
+        Apply the three-body loss factor exp(-k3 |psi|^4 dtau) in place.
+
+        This is the loss written as its own operator rather than as an
+        imaginary part of the potential. The template loop folds it into
+        ``utot`` instead, which is exact there because every other factor in
+        the split step is unitary. Inside the SGPE it is not: the propagator
+        carries an ``(i + gamma)`` prefactor, so an imaginary ``utot`` would
+        give the right decay multiplied by a spurious phase of order
+        ``gamma * k3 * |psi|^4 * dtau``. Applying the loss separately keeps the
+        SGPE in its standard form,
+
+            dpsi/dt = -(i + gamma)(H_mf - mu) psi - k3 |psi|^4 psi + noise
+
+        Args:
+            dtau: time increment to apply the loss over. Strang-split callers
+                pass half a step before and half after the propagator.
+        """
+        if not self.k3 or self.psi is None:
+            return
+        self.psi = torch.exp(-self.k3 * torch.abs(self.psi) ** 4 * dtau) * self.psi
+
     def _extract_phase(self) -> torch.Tensor:
         """
         Returns the phase of the condensate wavefunction.
@@ -259,6 +286,9 @@ class BaseBEC:
                 raise ValueError("External potential (uext) is None")
             self.uext = self.system.uext.potential
             self.u = params["u"]
+            # Three-body loss rate. Read with .get so a hand-built System or an
+            # older configuration without the key still runs (lossless).
+            self.k3 = params.get("k3", 0.0)
 
             # --- Coordinate-specific grid parameters ---
             if self._coord == "cylindrical":
@@ -475,8 +505,14 @@ class BaseBEC:
                 # Current time
                 t = self.dt * iteration * self.omega_ho
 
-                # Recompute total potential from the current psi and uext
+                # Recompute total potential from the current psi and uext.
+                # A non-zero three-body rate enters as an imaginary part: the
+                # real-space factor exp(-i dtau/2 (V + iL)) splits exactly into
+                # a unitary phase times the amplitude decay exp(dtau L / 2), so
+                # atoms are genuinely removed rather than just reshuffled.
                 utot = self.u * torch.abs(self.psi) ** 2 + self.uext
+                if self.k3:
+                    utot = utot + 1j * (-self.k3 * torch.abs(self.psi) ** 4)
 
                 # Save data at regular intervals
                 if (
@@ -570,7 +606,7 @@ class BaseBEC:
 
         self.energies.append(
             self._lib.calculate_energy_allocation(
-                self.psi, self.uext, (self.p1, self.p2, self.p3), u=self.u
+                self.psi, self.uext, (self.p1, self.p2, self.p3), self.d_x, u=self.u
             )
         )
         self.logger.info(f"t = {t / self.omega_ho}")
@@ -587,7 +623,7 @@ class BaseBEC:
             rw.save_figure_phase_cylindrical(self._extract_phase(), count)
 
         # RMS radius ⟨r²⟩^½ with cylindrical volume element r dr dφ dz
-        rms = self._lib.rms_radius(self.psi, self.r, self.dr, self.dphi, self.dz)
+        rms = self._gpe2d_lib.rms_radius(self.psi, self.r, self.dr, self.dphi, self.dz)
         self.rms_measurements[count] = rms
 
         # Radial density profile at z-midplane: n(r) = Σ_φ |ψ[:, :, n_z//2]|² · dφ

@@ -8,18 +8,34 @@ from src.library.gpe_library import GPE2DLibrary as gpe2d
 def write_psi(file_name, psi, n1, n2, n3):
     """
     Writes the wavefunction of the condensate to a file.
-    Uaually used for the ground state.
+    Usually used for the ground state.
+
+    One line per grid point, `(real,imag)`, in row-major order over
+    (n1, n2, n3) — the format `GroundState.read_ground_state` expects.
+
+    Written in a single vectorised pass. The previous element-by-element loop
+    cost a device round-trip per point, which ran to minutes for a full 3-D
+    grid. `%.17g` round-trips float64 exactly, so the stored state is bit-for-bit
+    recoverable.
 
     Args:
       file_name: str, the name of the file to be created
       psi: torch.Tensor, the wavefunction of the condensate
       n1, n2, n3: integer, the grid points in the 3 dimensions
+
+    Raises:
+      ValueError: if psi does not hold exactly n1*n2*n3 points.
     """
-    with open(file_name, 'w') as f:
-        for i in range(n1):
-            for j in range(n2):
-                for k in range(n3):
-                    f.write(f'({psi[i,j,k].real},{psi[i,j,k].imag})\n')
+    values = psi.detach().cpu().numpy().reshape(-1)
+    expected = n1 * n2 * n3
+    if values.size != expected:
+        raise ValueError(
+            f"psi has {values.size} points but the {n1}x{n2}x{n3} grid needs {expected}"
+        )
+    columns = np.empty((values.size, 2), dtype=np.float64)
+    columns[:, 0] = values.real
+    columns[:, 1] = values.imag
+    np.savetxt(file_name, columns, fmt='(%.17g,%.17g)')
 
 def write_data(psi1, count, x1, x3, n1, n3, a_ho, dx):
     """
@@ -88,29 +104,30 @@ def read_phase_file_2D(filename, n1, n3):
     phase = torch.from_numpy(phase)
     return phase
 
-def write_velocity2D(phase, count, x1, x3, n1, n2, n3, a_ho, p_grid):
+def write_velocity2D(psi, count, x1, x3, n1, n2, n3, a_ho, p_grid):
     """
     Writes the 2D velocity in a file.
     It assumes the plane is the n1-n3.
-    The format of the file is `x1, x3, velocity magnitude, velocity phase`
+    The format of the file is `x1, x3, velocity magnitude, velocity direction`
+
+    Takes the wavefunction rather than its phase: the velocity is
+    Im(psi* grad psi)/|psi|^2, which is free of the 2*pi branch cuts that make
+    a phase-derived velocity field meaningless around a vortex.
 
     Args:
-    -----
-    phase: torch.Tensor, the 2D phase. Phase of a section
-    count: int, the snapshot number
-    x1, x3: torch.Tensor, the axes
-    n1, n3: int, the grid resolution along x1 and x3
-    a_ho: float, the harmonic oscillator length
-    p_grid: Tuple[torch.Tensor], a tuple of tensors that stores
-      the meshgrid of the momentum.
+        psi (torch.Tensor): the condensate wavefunction (n1, n2, n3).
+        count (int): the snapshot number.
+        x1, x3 (torch.Tensor): the axes.
+        n1, n3 (int): the grid resolution along x1 and x3.
+        a_ho (float): the harmonic oscillator length.
+        p_grid (tuple): momentum meshgrids.
 
     Returns:
-    --------
-    None 
+        None
     """
     j = n2//2
     vel_file_name = f'V-{count:003}-cd.dat'
-    velocity_mag, veloc_phase = gpe2d.calculate_velocity2D(phase, p_grid)
+    velocity_mag, veloc_phase = gpe2d.calculate_velocity2D(psi, p_grid)
     with open(vel_file_name, 'w') as f:
         for i in range(n1):
             for k in range(n3):
@@ -176,11 +193,12 @@ def save_tensor_to_csv(tensor, filename):
 def write_energy_terms(energies, filename):
     """
     Writes the energy allocation in a file.
-    Parameters
-    ----------
-    energy: list[Dict], a list of dictionaries. Each dictionary is
-        the energy distribution among the kinetic, potential and interaction
-        terms along with the total energy for a specific timestamp.
+
+    Args:
+        energies (list[dict]): One dictionary per snapshot, holding the energy
+            split across the kinetic, potential and interaction terms along
+            with the total for that timestamp.
+        filename (str): Destination path.
     """
     with open(filename, 'w') as f:
         for energy in energies:
@@ -333,7 +351,9 @@ def write_velocity_cylindrical(psi, count, r, phi, n_r, n_phi, a_ho, dr, m_modes
         v_r(r, φ) = Im(ψ* ∂ψ/∂r) / |ψ|²         — central finite differences in r
         v_φ(r, φ) = Im(ψ* (1/r) ∂ψ/∂φ) / |ψ|²   — spectral (DFT in φ)
 
-    Grid points where |ψ|² < 1e-12 are set to zero.
+    Grid points whose density is below 1e-12 of the peak are set to zero. The
+    cut is relative because ψ is normalised over the whole grid, so an absolute
+    threshold means something different at every resolution.
 
     File format (CSV):
         r_μm, phi_rad, vr, v_phi, |v|
@@ -353,8 +373,8 @@ def write_velocity_cylindrical(psi, count, r, phi, n_r, n_phi, a_ho, dr, m_modes
     if z_idx is None:
         z_idx = n_z // 2
 
-    density_threshold = 1e-12
     density_full = torch.abs(psi) ** 2   # (n_r, n_phi, n_z)
+    density_threshold = 1e-12 * torch.max(density_full)
 
     # --- radial velocity: central finite differences in r ---
     dpsi_dr = torch.empty_like(psi)

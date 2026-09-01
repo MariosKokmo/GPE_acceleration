@@ -1,4 +1,4 @@
-experimental/
+
 .vscode/
 venv/
 __pycache__/
@@ -14,3 +14,8 @@ dist/
 # Runtime logs
 log.txt
 *_log.txt
+
+# Sphinx build products (docs/api is regenerated from the source each build)
+docs/_build/
+docs/api/
+docs/_extra/

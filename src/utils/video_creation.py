@@ -109,7 +109,7 @@ def create_velocity_video_cylindrical(count, simulation_name, n_r, n_phi, img_si
   """
   Create a video from cylindrical velocity snapshot files (r-φ plane, |v| magnitude).
 
-  The velocity magnitude is stored in column index 4 of the V-*-cd.dat files
+  The velocity magnitude is stored in column index 4 of the ``V-*-cd.dat`` files
   (format: r_μm, phi_rad, vr, v_phi, |v|).
 
   Args:

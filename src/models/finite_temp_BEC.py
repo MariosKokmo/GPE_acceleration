@@ -45,14 +45,14 @@ class FiniteTempBEC(BaseBEC):
     damping_coefficient : float  (default 0.03)
         Dimensionless damping rate γ.  Controls the strength of energy exchange
         with the thermal reservoir.
+
         - γ = 0   → standard GPE (no thermal effects at all)
         - γ ≈ 0.01–0.1 is the physically motivated range for cold-atom BECs.
 
     chemical_potential : float or None  (default None)
         Reservoir chemical potential μ in units of ħ ω_ho.
-        If None, μ is computed from the initial ground-state wavefunction as:
-            μ = e_kin + e_pot + 2·e_int
-        and kept fixed for the entire run.  The factor of 2 on e_int arises
+        If None, μ is computed from the initial ground-state wavefunction
+        as μ = e_kin + e_pot + 2·e_int, and kept fixed for the entire run.  The factor of 2 on e_int arises
         because μ = ∂E/∂N and the interaction energy scales as N².
 
     Usage example
@@ -106,15 +106,30 @@ class FiniteTempBEC(BaseBEC):
             Modes with H_mf < μ gain energy from the reservoir (amplified).
             This is the mechanism that drives condensate growth at finite T.
 
+        1b. Three-body loss  (see BaseBEC._apply_three_body_loss)
+            Strang-split as its own operator, half a step either side of the
+            propagator, when k3 is non-zero. It is a *separate* channel from
+            the reservoir coupling above, not a duplicate of it: γ exchanges
+            atoms between the condensate and the thermal cloud, while
+            three-body recombination ejects them from the trap entirely, so a
+            finite-temperature run generally wants both.
+
         2.  Stochastic noise injection  (see GPELibrary.generate_thermal_noise)
             Adds a complex Gaussian noise field η satisfying:
                 ⟨η*(r,t) η(r',t')⟩ = 2γ k_BT · δ(r−r') · δ(t−t')
             Only applied when T > 0.  Setting T = 0 with γ > 0 gives a
             purely dissipative (imaginary-time-like) damped GPE.
 
-        3.  Renormalisation
-            ψ is renormalised to enforce ∫|ψ|² dV = 1 after noise injection.
-            This imposes the grand-canonical particle-number constraint.
+        The norm is deliberately *not* reset
+            ∫|ψ|² dV is left free to evolve.  This is what makes the ensemble
+            grand-canonical: μ enters the propagator only as the constant shift
+            (H_mf − μ), so forcing the norm back to 1 after every step divides
+            that factor straight back out and reduces the run to a
+            number-conserving damped GPE in which μ has no effect at all.
+            With the norm free, N(t) = N₀·‖ψ‖² and the reservoir sets the atom
+            number through μ.  The initial ground state is very nearly a fixed
+            point of the damped propagator, so ‖ψ‖ stays close to 1 unless the
+            state is genuinely out of equilibrium with the reservoir.
 
         Chemical potential μ
             Computed once from the ground-state wavefunction at the first
@@ -149,9 +164,10 @@ class FiniteTempBEC(BaseBEC):
             for iteration in range(self.kmax):
                 t = self.dt * iteration * self.omega_ho
 
-                # Total mean-field potential at this step.
-                # No three-body loss term: the SGPE thermal channel already
-                # provides a particle-exchange mechanism with the reservoir.
+                # Total mean-field potential at this step. It stays real: the
+                # three-body loss is applied as a separate operator below
+                # rather than as an imaginary part of utot, because everything
+                # placed in utot is multiplied by the (i + γ) prefactor.
                 utot = self.u * torch.abs(self.psi) ** 2 + self.uext
 
                 # Write snapshot before evolving so the first frame is t=0.
@@ -166,7 +182,12 @@ class FiniteTempBEC(BaseBEC):
                 # Imprint dark solitons at the configured snapshot (no-op if disabled)
                 self._maybe_imprint_solitons(iteration)
 
-                # --- Step 1: SGPE deterministic split-step with (1−iγ) damping ---
+                # --- Step 1: three-body loss, first half-step ---
+                # Strang-split around the propagator and applied as its own
+                # operator, never folded into utot: see _apply_three_body_loss.
+                self._apply_three_body_loss(0.5 * self.dtau)
+
+                # --- Step 2: SGPE deterministic split-step with (1−iγ) damping ---
                 # exp(−(i+γ)·Δτ·(H_mf − μ)) applied via Strang splitting.
                 # This is the finite-temperature generalisation of split_step_step.
                 if self._coord == "cylindrical":
@@ -182,7 +203,10 @@ class FiniteTempBEC(BaseBEC):
                         self.dtau, self.p_sq, self.d_x,
                     )
 
-                # --- Step 2: Stochastic noise (fluctuation-dissipation theorem) ---
+                # --- Step 3: three-body loss, second half-step ---
+                self._apply_three_body_loss(0.5 * self.dtau)
+
+                # --- Step 4: Stochastic noise (fluctuation-dissipation theorem) ---
                 # Only active at T > 0.  At T = 0 the loop reduces to a
                 # damped (dissipative) GPE, useful for ground-state search.
                 if self.temperature > 0.0:
@@ -191,17 +215,14 @@ class FiniteTempBEC(BaseBEC):
                             self.psi.shape, self.gamma, self.temperature,
                             self.dtau, self.r, self.dr, self.dphi, self.dz, self.device,
                         )
-                        # --- Step 3: Renormalise after noise injection ---
-                        self.psi = self._lib.normalize(
-                            self.psi + noise, self.r, self.dr, self.dphi, self.dz,
-                        )
                     else:
                         noise = self._lib.generate_thermal_noise(
                             self.psi.shape, self.gamma, self.temperature,
                             self.dtau, self.d_x, self.device,
                         )
-                        # --- Step 3: Renormalise after noise injection ---
-                        self.psi = self._lib.normalize(self.psi + noise, self.d_x)
+                    # The norm is *not* reset here: see the note in the method
+                    # docstring — renormalising cancels the reservoir coupling.
+                    self.psi = self.psi + noise
 
                 # Update time-dependent external potential if the potential
                 # object supports it (e.g. a rotating trap or a stirring beam).

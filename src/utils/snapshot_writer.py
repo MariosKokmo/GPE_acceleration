@@ -16,6 +16,9 @@ Both backends support:
 
 Schema (dataset layout inside the run file)
 --------------------------------------------
+
+::
+
   /metadata            -- grid, frequencies, potential, etc.
   /time                -- 1-D array of snapshot timestamps          (shots,)
   /density/column      -- column density on the x-z plane          (shots, n1, n3)

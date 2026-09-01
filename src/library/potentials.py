@@ -66,7 +66,7 @@ class Potential():
       x1 = x_min[0] + torch.arange(n1, dtype=torch.float64, device=self.app.device) * dx[0]
       x2 = x_min[1] + torch.arange(n2, dtype=torch.float64, device=self.app.device) * dx[1]
       x3 = x_min[2] + torch.arange(n3, dtype=torch.float64, device=self.app.device) * dx[2]
-      gx, gy, gz = torch.meshgrid(x1, x2, x3)
+      gx, gy, gz = torch.meshgrid(x1, x2, x3, indexing='ij')
 
       # CAP starts near the box edge and smoothly ramps to full strength.
       max_x = max(torch.max(torch.abs(x1)).item(), torch.finfo(torch.float64).eps)
@@ -103,12 +103,12 @@ class Potential():
     def evol(self, t):
       """
       Returns the external potential at a specific time.
+
       Args:
-      -------
-       t: float, time
+          t (float): time.
+
       Returns:
-      -------
-       torch.Tensor, the potential at time t
+          torch.Tensor: the potential at time t.
       """
       return self.form(t) * self.potential + self._absorber_term(t)
     
@@ -163,7 +163,7 @@ class HarmonicPot(Potential):
       self.x2 = self.x_min[1] + torch.arange(self.n2, dtype=torch.float64)*self.dx[1]
       self.x3 = self.x_min[2] + torch.arange(self.n3, dtype=torch.float64)*self.dx[2]
       
-      gx, gy, gz = torch.meshgrid(self.x1, self.x2, self.x3)
+      gx, gy, gz = torch.meshgrid(self.x1, self.x2, self.x3, indexing='ij')
       self.pot = 0.5 * amplitude * ((self.w[0]*gx)**2 + (self.w[1]*gy)**2 + (self.w[2]*gz)**2)
       self.potential = self.pot.to(device=self.app.device, dtype=torch.double)
       self.form = lambda t: 1
@@ -174,7 +174,7 @@ class HarmonicPot(Potential):
       is still kept.
       Returns a new potential.
       """ 
-      gx, gy, gz = torch.meshgrid(torch.zeros_like(self.x1), self.x2, torch.zeros_like(self.x3))
+      gx, gy, gz = torch.meshgrid(torch.zeros_like(self.x1), self.x2, torch.zeros_like(self.x3), indexing='ij')
       self.pot = 0.5 * amplitude * ((self.w[0]*gx)**2 + (self.w[1]*gy)**2 + (self.w[2]*gz)**2)
       self.potential = self.pot.to(device=self.app.device, dtype=torch.double)
       self.form = lambda t: 1
@@ -206,7 +206,7 @@ class RampHarmonicPot(Potential):
       x1 = x_min[0] + torch.arange(n1, dtype=torch.float64)*dx[0] # size n1
       x2 = x_min[1] + torch.arange(n2, dtype=torch.float64)*dx[1]
       x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
-      gx, gy, gz = torch.meshgrid(x1, x2, x3)
+      gx, gy, gz = torch.meshgrid(x1, x2, x3, indexing='ij')
       self.pot = 0.5 * ((w[0]*gx)**2 + (w[1]*gy)**2 + (w[2]*gz)**2)
       self.potential = self.pot.to(device=app.device, dtype=torch.double)
       self.form = lambda t: initial + (amplitude - initial) * ((t-tinit) / (tfinal-tinit))
@@ -239,7 +239,7 @@ class RotatingPot(Potential):
       x2 = x_min[1] + torch.arange(n2, dtype=torch.float64, device=self.app.device) * dx[1]
       x3 = x_min[2] + torch.arange(n3, dtype=torch.float64, device=self.app.device) * dx[2]
 
-      self.gx, self.gy, self.gz = torch.meshgrid(x1, x2, x3)
+      self.gx, self.gy, self.gz = torch.meshgrid(x1, x2, x3, indexing='ij')
       self.amplitude = amplitude
       self.angular_frequency = angular_frequency
       self.axis = self._parse_axis(axis)
@@ -307,7 +307,7 @@ class CustomPot(Potential):
       x1 = x_min[0] + torch.arange(n1, dtype=torch.float64)*dx[0] # size n1
       x2 = x_min[1] + torch.arange(n2, dtype=torch.float64)*dx[1]
       x3 = x_min[2] + torch.arange(n3, dtype=torch.float64)*dx[2]
-      gx, gy, gz = torch.meshgrid(x1, x2, x3)
+      gx, gy, gz = torch.meshgrid(x1, x2, x3, indexing='ij')
       self.pot = None
       self.potential = self.pot.to(device=app.device, dtype=torch.double)
       self.form = None
