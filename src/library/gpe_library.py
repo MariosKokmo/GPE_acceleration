@@ -1,9 +1,79 @@
+r"""
+Core GPE solver library on a Cartesian grid.
+
+Everything needed to propagate the Gross-Pitaevskii equation
+
+.. math::
+
+    i\,\frac{\partial \psi}{\partial t} =
+        \left[-\frac{\nabla^2}{2} + V_\mathrm{ext}(\mathbf{r}, t)
+              + u \lvert \psi \rvert^{2}\right]\psi
+
+with the split-step Fourier method, in dimensionless units
+(:math:`\hbar = m = \omega_\mathrm{ho} = 1`). One iteration is a Strang
+splitting — a real-space half-step, a full kinetic step evaluated in Fourier
+space, then a second real-space half-step,
+
+.. math::
+
+    \psi(t + \Delta\tau) =
+        e^{-i U_\mathrm{tot} \Delta\tau / 2}\,
+        \mathcal{F}^{-1}\!\left[e^{-i p^2 \Delta\tau / 2}\,
+            \mathcal{F}\left[
+                e^{-i U_\mathrm{tot} \Delta\tau / 2}\, \psi(t)\right]\right],
+
+which is second-order accurate in :math:`\Delta\tau` because the two
+non-commuting operators are applied symmetrically.
+
+The module is split in three:
+
+:class:`GPELibrary`
+    The dimension-agnostic core: grids, the propagation steps, the energy and
+    chemical-potential diagnostics, and the stochastic (SGPE) machinery.
+:class:`GPE2DLibrary`
+    Additions for the effectively two-dimensional model, whose simulation
+    plane is x–z: point vortices, dark solitons, in-plane velocity.
+:class:`GPE3DLibrary`
+    Additions for fully three-dimensional runs: vortex rings and lines,
+    column densities and slices, the full velocity field and angular momentum.
+
+Both subclasses inherit from :class:`GPELibrary`, so either one exposes the
+whole core as well.
+
+Grid conventions
+----------------
+
+Real-space axes are :math:`x_i = x_\mathrm{min} + i\,\mathrm{d}x`. Momentum
+axes are in FFT (wrapped) order — the first half positive, the second half
+negative — matching :func:`torch.fft.fftn`, and are held as 1-D axes that
+broadcast rather than as materialised meshgrids wherever possible. Every
+tensor is allocated on the requested device, so the evolution loop needs no
+host/device transfer.
+
+Wavefunctions are normalised as :math:`\mathrm{d}V \sum \lvert\psi\rvert^2 = 1`,
+so every integral in this module carries the cell volume ``d_x`` explicitly.
+"""
 import numpy as np
 import torch
 from .parameters import CONSTANTS
 from .common_utils import CommonUtils as cu
 
 class GPELibrary:
+    r"""
+    Coordinate-agnostic core of the Cartesian GPE solver.
+
+    A namespace of static methods covering the whole simulation loop: grid
+    construction (:meth:`init_grid`), the split-step propagator
+    (:meth:`split_step_step` and its kinetic half :meth:`p_evolution`), the
+    normalisation, the diagnostics (:meth:`calculate_energy_allocation`,
+    :meth:`calculate_chemical_potential`, :meth:`superfluid_velocity`,
+    :meth:`mod_grad_psi`) and the stochastic extension
+    (:meth:`generate_thermal_noise`, :meth:`sgpe_step`).
+
+    Nothing here is specific to a number of dimensions; the 2-D and 3-D
+    specialisations live in :class:`GPE2DLibrary` and :class:`GPE3DLibrary`.
+    """
+
     @staticmethod
     def _real_axis(
         n: int,
@@ -11,7 +81,19 @@ class GPELibrary:
         dx: float,
         device: torch.device
     ) -> torch.Tensor:
-        """Real-space axis x_i = x_min + i·dx, i = 0 … n-1, built on ``device``."""
+        r"""
+        Build a real-space axis :math:`x_i = x_\mathrm{min} + i\,\mathrm{d}x`.
+
+        Args:
+            n (int): Number of grid points, so that :math:`i = 0 \ldots n-1`.
+            x_min (float): Coordinate of the first point.
+            dx (float): Grid spacing.
+            device (torch.device): Device the axis is allocated on, so that no
+                host/device transfer is needed later.
+
+        Returns:
+            torch.Tensor: The axis, of shape ``(n,)`` and dtype ``float64``.
+        """
         return float(x_min) + torch.arange(n, dtype=torch.float64, device=device) * float(dx)
 
     @staticmethod
@@ -20,11 +102,21 @@ class GPELibrary:
         dp: float,
         device: torch.device
     ) -> torch.Tensor:
-        """
-        Momentum axis in FFT (wrapped) ordering, built on ``device``.
+        r"""
+        Build a momentum axis in FFT (wrapped) ordering.
 
-        Indices 0 … n/2-1 carry positive momenta, indices n/2 … n-1 carry the
-        negative ones, matching the layout of :func:`torch.fft.fftn`.
+        Indices :math:`0 \ldots n/2 - 1` carry the positive momenta and
+        :math:`n/2 \ldots n-1` the negative ones, matching the layout of
+        :func:`torch.fft.fftn`, so the axis can multiply a transformed field
+        directly.
+
+        Args:
+            n (int): Number of grid points.
+            dp (float): Momentum-space grid spacing.
+            device (torch.device): Device the axis is allocated on.
+
+        Returns:
+            torch.Tensor: The axis, of shape ``(n,)`` and dtype ``float64``.
         """
         k = torch.arange(n, dtype=torch.float64, device=device)
         k[n // 2:] -= n
@@ -36,7 +128,7 @@ class GPELibrary:
         dim: int,
         zero_nyquist: bool = False
     ) -> list:
-        """
+        r"""
         Normalise a momentum-grid argument to ``dim`` broadcastable tensors.
 
         Both conventions used across this library are accepted:
@@ -47,16 +139,17 @@ class GPELibrary:
         - a tuple of **N-D meshgrids** ``(px, py, pz)`` (``p_grid`` from
           :meth:`init_grid`) — passed through unchanged.
 
-        The Nyquist mode
-        ----------------
-        On an even-sized grid the highest mode is its own alias (+π/dx and
-        −π/dx are the same sampled wave), so its *first* derivative is
-        undefined: ``i·p`` there breaks the Hermitian symmetry that keeps the
-        derivative of a real field real. The leak is tiny in absolute terms but
-        gets divided by the density in the velocity field, where it can
-        dominate the dilute tail. Odd-order derivatives should therefore set
-        that coefficient to zero — ``p²`` in the kinetic operator is an *even*
-        order and must keep it, which is why this is opt-in.
+        Note:
+            **The Nyquist mode.** On an even-sized grid the highest mode is its
+            own alias (:math:`+\pi/\mathrm{d}x` and :math:`-\pi/\mathrm{d}x`
+            are the same sampled wave), so its *first* derivative is undefined:
+            multiplying by :math:`i p` there breaks the Hermitian symmetry that
+            keeps the derivative of a real field real. The leak is tiny in
+            absolute terms but gets divided by the density in the velocity
+            field, where it can dominate the dilute tail. Odd-order derivatives
+            should therefore set that coefficient to zero — :math:`p^2` in the
+            kinetic operator is an *even* order and must keep it, which is why
+            this is opt-in.
 
         Args:
             p_axes: Sequence of momentum tensors, at least ``dim`` of them.
@@ -102,28 +195,37 @@ class GPELibrary:
         components=None,
         density_floor: float = 1e-12
     ) -> list:
-        """
-        Superfluid velocity components, in dimensionless units (ℏ/m = 1):
+        r"""
+        Compute the superfluid velocity components.
 
-            v_i = Im( ψ* ∂_i ψ ) / |ψ|²
+        In dimensionless units (:math:`\hbar/m = 1`),
 
-        Take the derivative of ψ, never of its phase
-        --------------------------------------------
-        This expression equals ∂_i θ for the *unwrapped* phase θ, but it is
-        computed from ψ, which is single-valued and smooth. Differentiating
-        ``angle(ψ)`` instead looks equivalent and is not: the wrapped phase
-        jumps by 2π across a branch cut running out of every vortex core, and a
-        spectral derivative of a discontinuous field rings across the *whole*
-        domain, not just near the cut. Measured against an analytic
-        vortex-antivortex field, the phase route is wrong by more than 100%
-        everywhere while this one is limited only by grid resolution.
+        .. math::
+
+            v_i = \frac{\mathrm{Im}\left(\psi^{*}\,
+                \partial_i \psi\right)}{\lvert \psi \rvert^{2}} ,
+
+        with the derivative evaluated spectrally.
+
+        Note:
+            **Take the derivative of** :math:`\psi`, **never of its phase.**
+            The expression above equals :math:`\partial_i \theta` for the
+            *unwrapped* phase :math:`\theta`, but it is computed from
+            :math:`\psi`, which is single-valued and smooth. Differentiating
+            ``angle(psi)`` instead looks equivalent and is not: the wrapped
+            phase jumps by :math:`2\pi` across a branch cut running out of
+            every vortex core, and a spectral derivative of a discontinuous
+            field rings across the *whole* domain, not just near the cut.
+            Measured against an analytic vortex-antivortex field, the phase
+            route is wrong by more than 100% everywhere while this one is
+            limited only by grid resolution.
 
         The velocity is undefined where there is no condensate. In floating
         point the density is essentially never exactly zero, so a bare
-        ``density > 0`` test lets the dilute tail (n ~ 1e-30) produce enormous
-        meaningless values. The cut is therefore taken *relative* to the peak
-        density, and the division itself is guarded so no inf/NaN is generated
-        in the discarded region.
+        ``density > 0`` test lets the dilute tail (:math:`n \sim 10^{-30}`)
+        produce enormous meaningless values. The cut is therefore taken
+        *relative* to the peak density, and the division itself is guarded so
+        no inf/NaN is generated in the discarded region.
 
         Args:
             psi (torch.Tensor): Wavefunction.
@@ -167,23 +269,33 @@ class GPELibrary:
         n3: int,
         device: torch.device
     ) -> tuple:
-        """
-        Initializes the grid for real and momentum space.
+        r"""
+        Initialise the real-space and momentum-space grids.
 
-        All tensors are allocated directly on ``device`` so that no host/device
-        transfer is needed later in the evolution loop.
+        All tensors are allocated directly on ``device``, so that no
+        host/device transfer is needed later in the evolution loop.
 
         Args:
-            x_min (list): Minimum values for the x-axis in each dimension.
-            dx (list): Grid spacing in real space for each dimension.
-            dp (list): Grid spacing in momentum space for each dimension.
-            n1, n2, n3 (int): Number of grid points in each dimension.
-            device (torch.device): Device to allocate tensors (CPU or GPU).
+            x_min (list): Coordinate of the first real-space point in each
+                dimension.
+            dx (list): Real-space grid spacing in each dimension.
+            dp (list): Momentum-space grid spacing in each dimension.
+            n1 (int): Number of grid points along the first dimension.
+            n2 (int): Number of grid points along the second dimension.
+            n3 (int): Number of grid points along the third dimension.
+            device (torch.device): Device to allocate the tensors on (CPU or
+                GPU).
 
         Returns:
-            tuple: (x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid) where
-            x1..x3 and p1..p3 are 1-D axes, p_sq is |p|² on the full grid, and
-            space_grid / p_grid are the corresponding 3-D meshgrids.
+            tuple: ``(x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid)`` —
+            ``x1``–``x3`` and ``p1``–``p3`` are the 1-D axes, ``p_sq`` is
+            :math:`\lvert p \rvert^2` on the full grid, and ``space_grid`` /
+            ``p_grid`` are the corresponding 3-D meshgrids.
+
+        Note:
+            The meshgrids are built with ``indexing='ij'``. The PyTorch default
+            flips to ``'xy'`` in future releases, which would silently
+            transpose the first two axes.
         """
         x1 = GPELibrary._real_axis(n1, x_min[0], dx[0], device)
         x2 = GPELibrary._real_axis(n2, x_min[1], dx[1], device)
@@ -209,16 +321,24 @@ class GPELibrary:
         dtau: float,
         p_sq: torch.Tensor
     ) -> torch.Tensor:
-        """
-        Momentum-space evolution step for the wavefunction.
+        r"""
+        Apply the kinetic evolution operator in momentum space.
+
+        The kinetic term is diagonal in Fourier space, so the full step is a
+        transform, a pointwise multiplication and a transform back,
+
+        .. math::
+
+            \psi \leftarrow \mathcal{F}^{-1}\!\left[
+                e^{-i\,\Delta\tau\, p^2 / 2}\, \mathcal{F}[\psi]\right].
 
         Args:
             psi1 (torch.Tensor): Wavefunction of the system.
-            dtau (float): Time evolution step.
-            p_sq (torch.Tensor): Squared momentum grid.
+            dtau (float): Time step :math:`\Delta\tau`.
+            p_sq (torch.Tensor): Squared momentum grid :math:`\lvert p\rvert^2`.
 
         Returns:
-            torch.Tensor: Updated wavefunction.
+            torch.Tensor: Updated wavefunction, of the same shape as ``psi1``.
         """
         psiF = torch.fft.fftn(psi1, norm='forward')
         psiF = torch.exp(-1j * dtau * 0.5 * p_sq) * psiF
@@ -229,15 +349,21 @@ class GPELibrary:
         phi: torch.Tensor,
         d_x: float
     ) -> torch.Tensor:
-        """
-        Normalize the wavefunction.
+        r"""
+        Normalise the wavefunction to unit norm.
+
+        .. math::
+
+            \phi \leftarrow \frac{\phi}
+                {\sqrt{\mathrm{d}V \sum \lvert \phi \rvert^{2}}}
 
         Args:
-            phi (torch.Tensor): Wavefunction to be normalized.
-            d_x (float): Grid cell volume.
+            phi (torch.Tensor): Wavefunction to be normalised.
+            d_x (float): Grid cell volume :math:`\mathrm{d}V`.
 
         Returns:
-            torch.Tensor: Normalized wavefunction, ∫|φ|² dV = 1.
+            torch.Tensor: Normalised wavefunction, satisfying
+            :math:`\int \lvert \phi \rvert^{2}\,\mathrm{d}V = 1`.
 
         Note:
             No guard is placed on a vanishing norm; feeding in an identically
@@ -255,28 +381,47 @@ class GPELibrary:
         d_x: float,
         renormalise: bool = False
     ) -> torch.Tensor:
-        """
-        Perform a step of the split-step Fourier transform.
+        r"""
+        Advance the wavefunction by one split-step Fourier iteration.
 
-        For a real ``utot1`` every factor applied here has unit modulus, so the
-        norm is conserved to machine precision and no renormalisation is needed.
-        When ``utot1`` carries an imaginary part (three-body losses, complex
-        absorbing potential) the norm is *meant* to decay: renormalising would
-        silently cancel the atom loss, which is why ``renormalise`` defaults to
-        ``False``.
+        A Strang splitting — real-space half-step, full kinetic step, real-space
+        half-step,
+
+        .. math::
+
+            \psi(t + \Delta\tau) =
+                e^{-i U_\mathrm{tot} \Delta\tau / 2}\,
+                \mathcal{F}^{-1}\!\left[e^{-i p^2 \Delta\tau / 2}\,
+                    \mathcal{F}\left[
+                        e^{-i U_\mathrm{tot} \Delta\tau / 2}\,
+                        \psi(t)\right]\right],
+
+        which is second-order accurate in :math:`\Delta\tau` because the two
+        non-commuting operators are applied symmetrically.
+
+        Note:
+            For a real ``utot1`` every factor applied here has unit modulus, so
+            the norm is conserved to machine precision and no renormalisation
+            is needed. When ``utot1`` carries an imaginary part (three-body
+            losses, a complex absorbing potential) the norm is *meant* to
+            decay: renormalising would silently cancel the atom loss, which is
+            why ``renormalise`` defaults to ``False``.
 
         Args:
             psi1 (torch.Tensor): Wavefunction of the system.
-            utot1 (torch.Tensor): Total potential.
-            dtau (float): Time evolution step.
+            utot1 (torch.Tensor): Total real-space operator
+                :math:`U_\mathrm{tot}`, frozen for the duration of the step.
+            dtau (float): Time step :math:`\Delta\tau`.
             p_sq (torch.Tensor): Squared momentum grid.
-            d_x (float): Grid cell volume (only used when ``renormalise``).
-            renormalise (bool, optional): Force ∫|ψ|² dV = 1 after the step.
-                Only meaningful for a number-conserving run with a lossy
-                potential. Default ``False``.
+            d_x (float): Grid cell volume; only used when ``renormalise`` is
+                set.
+            renormalise (bool, optional): Force
+                :math:`\int \lvert \psi \rvert^{2}\,\mathrm{d}V = 1` after the
+                step. Only meaningful for a deliberately number-conserving run
+                with a lossy potential (default ``False``).
 
         Returns:
-            torch.Tensor: Updated wavefunction.
+            torch.Tensor: Updated wavefunction, of the same shape as ``psi1``.
         """
         psi1 = cu.x_evolution(psi1, utot1, dtau)
         psi1 = GPELibrary.p_evolution(psi1, dtau, p_sq)
@@ -290,25 +435,41 @@ class GPELibrary:
         psi: torch.Tensor,
         p_axes: list
     ) -> torch.Tensor:
-        """
-        Calculate the modulus of the gradient of the wavefunction, |∇ψ|.
+        r"""
+        Compute the modulus of the gradient of the wavefunction,
+        :math:`\lvert \nabla \psi \rvert`.
 
-        The derivative of a complex field is itself complex, so each component
-        contributes ``|∂_i ψ|² = Re(∂_i ψ)² + Im(∂_i ψ)²``. Keeping only the
-        real part (as an earlier version did) understates the kinetic energy of
-        any state carrying phase structure — vortices, solitons, or simply a
-        state undergoing real-time evolution.
+        Each derivative is taken spectrally, and the components are combined as
+
+        .. math::
+
+            \lvert \nabla \psi \rvert =
+                \sqrt{\sum_i \lvert \partial_i \psi \rvert^{2}},
+            \qquad
+            \lvert \partial_i \psi \rvert^{2} =
+                \mathrm{Re}(\partial_i \psi)^{2}
+                + \mathrm{Im}(\partial_i \psi)^{2}.
+
+        The derivative of a complex field is itself complex, so both parts
+        count. Keeping only the real part (as an earlier version did)
+        understates the kinetic energy of any state carrying phase structure —
+        vortices, solitons, or simply a state undergoing real-time evolution.
 
         Works for 1-, 2- and 3-D fields. ``p_axes`` may be either 1-D momentum
-        axes or full meshgrids (see :meth:`_broadcast_momentum_axes`).
+        axes or full meshgrids (see :meth:`_broadcast_momentum_axes`), and the
+        Nyquist coefficient is dropped since this is a first derivative.
 
         Args:
             psi (torch.Tensor): Condensate wavefunction.
-            p_axes (list): Momentum space axes (or meshgrids), one per dimension.
+            p_axes (list): Momentum-space axes (or meshgrids), one per
+                dimension.
 
         Returns:
-            torch.Tensor: Modulus of the gradient of the wavefunction, same
-            shape as ``psi``.
+            torch.Tensor: Modulus of the gradient, of the same shape as
+            ``psi``.
+
+        Raises:
+            ValueError: If ``psi`` is not 1-, 2- or 3-dimensional.
         """
         dim = psi.dim()
         if dim not in (1, 2, 3):
@@ -334,16 +495,25 @@ class GPELibrary:
         d_x: float,
         **parameters
     ) -> dict:
-        """
-        Calculate energy allocation for the condensate.
+        r"""
+        Split the condensate energy into its kinetic, potential and interaction
+        parts.
+
+        .. math::
+
+            e_\mathrm{kin} = \frac{1}{2}\int \lvert \nabla\psi \rvert^{2}\,
+                \mathrm{d}V,
+            \qquad
+            e_\mathrm{pot} = \int V_\mathrm{ext}\lvert \psi \rvert^{2}\,
+                \mathrm{d}V,
+            \qquad
+            e_\mathrm{int} = \frac{u}{2}\int \lvert \psi \rvert^{4}\,
+                \mathrm{d}V
 
         Every term is an integral over the grid, so each sum carries the cell
-        volume ``d_x``; ψ is normalised as ``d_x·Σ|ψ|² = 1``. Omitting it makes
+        volume ``d_x``; :math:`\psi` is normalised as
+        :math:`\mathrm{d}V \sum \lvert\psi\rvert^2 = 1`. Omitting it would make
         the energies scale with the grid spacing instead of being physical.
-
-            e_kin = ½ ∫|∇ψ|² dV
-            e_pot = ∫ V_ext |ψ|² dV
-            e_int = ½ u ∫|ψ|⁴ dV
 
         Args:
             psi (torch.Tensor): BEC wavefunction.
@@ -352,14 +522,14 @@ class GPELibrary:
                 energy — the imaginary part is a loss rate, not an energy.
             p_grid (tuple): Momentum space axes (1-D) or meshgrids.
             d_x (float): Grid cell volume (product of dx in each dimension).
-            **parameters: Must include the interaction strength ``u``.
+            **parameters: Must include the interaction strength ``"u"``.
 
         Returns:
-            dict: Energy terms (kinetic, potential, interaction, total), in
-            units of ħ·ω_ho.
+            dict: The keys ``'e_kin'``, ``'e_pot'``, ``'e_int'`` and
+            ``'E_total'``, in units of :math:`\hbar\omega_\mathrm{ho}`.
 
         Raises:
-            ValueError: If ``u`` is not supplied.
+            ValueError: If ``"u"`` is not supplied.
         """
         if 'u' not in parameters:
             raise ValueError("calculate_energy_allocation requires the interaction strength 'u'")
@@ -388,33 +558,45 @@ class GPELibrary:
         p_grid: tuple,
         d_x: float
     ) -> float:
-        """
-        Compute the mean-field chemical potential μ = ⟨ψ|H_mf|ψ⟩.
+        r"""
+        Compute the mean-field chemical potential
+        :math:`\mu = \langle \psi \lvert H_\mathrm{mf} \rvert \psi \rangle`.
 
-        This is used by the SGPE as the grand-canonical reservoir potential
-        that drives condensate growth (modes below μ) and decay (modes above μ).
+        With the mean-field Hamiltonian in dimensionless units
+        (:math:`\hbar = m = \omega_\mathrm{ho} = 1`),
 
-        The mean-field Hamiltonian in dimensionless units (ħ = m = ω_ho = 1) is:
+        .. math::
 
-            H_mf = -∇²/2 + V_ext + u|ψ|²
+            H_\mathrm{mf} = -\frac{\nabla^2}{2} + V_\mathrm{ext}
+                            + u \lvert \psi \rvert^{2},
 
-        The chemical potential is then:
+        the chemical potential follows from the energy terms of
+        :meth:`calculate_energy_allocation` as
 
-            μ = ⟨ψ|H_mf|ψ⟩ = e_kin + e_pot + 2·e_int
+        .. math::
 
-        where e_int = (u/2)∫|ψ|⁴ dV.  The interaction term is counted *twice*
-        because μ = ∂E/∂N and differentiating the (u/2)N² term yields uN.
+            \mu = e_\mathrm{kin} + e_\mathrm{pot} + 2\,e_\mathrm{int}.
+
+        The interaction term is counted *twice* because
+        :math:`\mu = \partial E / \partial N`, and differentiating the
+        :math:`(u/2)N^2` term yields :math:`uN`.
+
+        This is what the SGPE uses as the grand-canonical reservoir potential:
+        modes below :math:`\mu` grow, modes above it decay.
 
         Args:
-            psi (torch.Tensor): Normalised BEC wavefunction (n1, n2, n3).
+            psi (torch.Tensor): Normalised BEC wavefunction of shape
+                ``(n1, n2, n3)``.
             uext (torch.Tensor): External trapping potential on the grid.
-            u (float): Dimensionless interaction strength.
-            p_grid (tuple): (p1, p2, p3) momentum axes, either as 1-D axes or
-                as 3-D meshgrids.
-            d_x (float): Grid cell volume (product of dx in each dimension).
+            u (float): Dimensionless interaction strength :math:`u`.
+            p_grid (tuple): Momentum axes ``(p1, p2, p3)``, either as 1-D axes
+                or as 3-D meshgrids.
+            d_x (float): Grid cell volume (the product of ``dx`` over the
+                dimensions).
 
         Returns:
-            float: Chemical potential μ in units of ħ·ω_ho.
+            float: The chemical potential :math:`\mu`, in units of
+            :math:`\hbar\omega_\mathrm{ho}`.
         """
         energy = GPELibrary.calculate_energy_allocation(psi, uext, p_grid, d_x, u=u)
         mu = energy['e_kin'] + energy['e_pot'] + 2.0 * energy['e_int']
@@ -431,44 +613,58 @@ class GPELibrary:
         p_sq: torch.Tensor = None,
         e_cut: float = None
     ) -> torch.Tensor:
-        """
+        r"""
         Generate a complex Gaussian noise field for one SGPE time step.
 
-        The SGPE noise must satisfy the fluctuation-dissipation theorem:
+        The noise has to satisfy the fluctuation-dissipation theorem,
 
-            ⟨η*(r,t) η(r',t')⟩ = 2γ·k_BT · δ(r−r') · δ(t−t')
+        .. math::
 
-        Discretising on a grid with cell volume δV = d_x and time step δt = dtau:
+            \langle \eta^{*}(\mathbf{r}, t)\, \eta(\mathbf{r}', t') \rangle =
+                2\gamma\, k_B T\, \delta(\mathbf{r} - \mathbf{r}')\,
+                \delta(t - t'),
 
-            noise amplitude = √(γ · kT · dtau / d_x)
+        which on a grid with cell volume :math:`\delta V = \mathrm{d}V` and time
+        step :math:`\delta t = \Delta\tau` fixes the per-point amplitude at
 
-        so that ⟨|Δψ_noise|²⟩ = 2·γ·kT·dtau/d_x per grid point, matching the
-        continuous fluctuation-dissipation relation.
+        .. math::
 
-        Projection (the "P" of the *projected* SGPE)
-        --------------------------------------------
-        Delta-correlated noise is white across the whole grid, so it feeds
-        energy into every mode up to the Nyquist momentum. The c-field
-        description is only valid up to a cutoff energy, above which the modes
-        belong to the thermal cloud rather than the classical field. Pass
-        ``p_sq`` together with ``e_cut`` to zero the noise in every mode with
-        p²/2 > e_cut; without it the noise is unprojected and the run will heat
-        artificially at large momenta.
+            \sqrt{\frac{\gamma\, k_B T\, \Delta\tau}{\mathrm{d}V}},
+
+        so that
+        :math:`\langle \lvert \Delta\psi_\mathrm{noise} \rvert^{2}\rangle =
+        2\gamma k_B T \Delta\tau / \mathrm{d}V` per grid point, matching the
+        continuous relation.
+
+        Note:
+            **Projection — the "P" of the** *projected* **SGPE.**
+            Delta-correlated noise is white across the whole grid, so it feeds
+            energy into every mode up to the Nyquist momentum. The c-field
+            description is only valid up to a cutoff energy, above which the
+            modes belong to the thermal cloud rather than to the classical
+            field. Pass ``p_sq`` together with ``e_cut`` to zero the noise in
+            every mode with :math:`p^2/2 > e_\mathrm{cut}`; without it the
+            noise is unprojected and the run will heat artificially at large
+            momenta.
 
         Args:
-            shape (tuple): Grid shape (n1, n2, n3).
-            gamma (float): Dimensionless damping coefficient γ.
-            kT (float): Dimensionless temperature k_B·T / (ħ·ω_ho).
-            dtau (float): Dimensionless time step ω_ho·dt.
-            d_x (float): Grid cell volume (product of dx in each dimension).
+            shape (tuple): Grid shape ``(n1, n2, n3)``.
+            gamma (float): Dimensionless damping coefficient :math:`\gamma`.
+            kT (float): Dimensionless temperature
+                :math:`k_B T / (\hbar\omega_\mathrm{ho})`.
+            dtau (float): Dimensionless time step
+                :math:`\omega_\mathrm{ho}\,\mathrm{d}t`.
+            d_x (float): Grid cell volume (the product of ``dx`` over the
+                dimensions).
             device (torch.device): Computation device.
-            p_sq (torch.Tensor, optional): Squared momentum grid |p|², required
-                for projection.
-            e_cut (float, optional): Cutoff energy p²/2 in units of ħ·ω_ho.
-                Ignored unless ``p_sq`` is also given.
+            p_sq (torch.Tensor, optional): Squared momentum grid
+                :math:`\lvert p \rvert^{2}`, required for the projection.
+            e_cut (float, optional): Cutoff energy :math:`p^2/2` in units of
+                :math:`\hbar\omega_\mathrm{ho}`. Ignored unless ``p_sq`` is
+                also given.
 
         Returns:
-            torch.Tensor: Complex noise tensor of shape (n1, n2, n3).
+            torch.Tensor: Complex noise tensor of shape ``(n1, n2, n3)``.
         """
         amplitude = (gamma * kT * dtau / d_x) ** 0.5
         xi_real = torch.randn(shape, dtype=torch.float64, device=device)
@@ -492,61 +688,84 @@ class GPELibrary:
         d_x: float,
         renormalise: bool = False
     ) -> torch.Tensor:
-        """
-        Perform one deterministic SGPE split-step with (1 − iγ) damping.
+        r"""
+        Perform one deterministic SGPE split-step with :math:`(1 - i\gamma)`
+        damping.
 
-        The SGPE modifies the GPE by replacing the purely unitary evolution
-        operator with a dissipative one:
+        The SGPE replaces the unitary GPE evolution operator with a dissipative
+        one,
 
-            GPE:   exp(−i · dt · H_mf)
-            SGPE:  exp(−(i + γ) · dt · (H_mf − μ))
+        .. math::
 
-        The (i + γ) factor arises from the (1 − iγ) prefactor in the SGPE:
+            \text{GPE:}\quad e^{-i\,\mathrm{d}t\, H_\mathrm{mf}}
+            \qquad\longrightarrow\qquad
+            \text{SGPE:}\quad
+                e^{-(i + \gamma)\,\mathrm{d}t\,(H_\mathrm{mf} - \mu)},
 
-            ∂ψ/∂t = −(i + γ)(H_mf − μ)ψ + noise
+        the :math:`(i + \gamma)` factor coming from the :math:`(1 - i\gamma)`
+        prefactor of the equation of motion,
 
-        Modes with H_mf > μ are exponentially damped (energy removed to reservoir).
-        Modes with H_mf < μ are amplified (energy drawn from reservoir).
-        This drives the system toward the thermal equilibrium state at temperature T.
+        .. math::
 
-        The split-step sequence (Strang splitting) is:
+            \frac{\partial \psi}{\partial t} =
+                -(i + \gamma)\,(H_\mathrm{mf} - \mu)\,\psi + \eta .
 
-            1. Real-space half-step:  ψ ← exp(−(i+γ)·Δτ/2·(V_eff − μ)) · ψ
-            2. Momentum full-step:    ψ̃ ← exp(−(i+γ)·Δτ·p²/2) · ψ̃
-            3. Real-space half-step:  ψ ← exp(−(i+γ)·Δτ/2·(V_eff − μ)) · ψ
+        Modes with :math:`H_\mathrm{mf} > \mu` are exponentially damped (energy
+        goes to the reservoir) and modes with :math:`H_\mathrm{mf} < \mu` are
+        amplified (energy is drawn from it), which drives the system towards
+        thermal equilibrium at temperature :math:`T`.
 
-        where V_eff = u|ψ|² + V_ext is frozen at the start of the step.
+        The step is the same Strang splitting as :meth:`split_step_step`, with
+        :math:`V_\mathrm{eff} = u\lvert\psi\rvert^2 + V_\mathrm{ext}` frozen at
+        the start of the step:
 
-        The norm is deliberately left free
-        ----------------------------------
-        μ enters only as the constant shift ``utot − mu``, so the whole step
-        multiplies ψ by the global factor ``exp((i+γ)·Δτ·μ)``. Renormalising
-        afterwards divides that factor straight back out and leaves nothing but
-        an unobservable global phase: with a forced norm, μ has *no effect
-        whatsoever* on the dynamics and the grand-canonical growth/decay the
-        SGPE is built around simply does not happen.
+        1. real-space half-step
+           :math:`\psi \leftarrow e^{-(i+\gamma)\Delta\tau (V_\mathrm{eff} - \mu)/2}\psi`;
+        2. momentum full-step
+           :math:`\tilde\psi \leftarrow e^{-(i+\gamma)\Delta\tau p^2/2}\tilde\psi`;
+        3. real-space half-step, as in 1.
 
-        Letting the norm evolve is also self-consistent with the units used
-        here. With ``d_x·Σ|ψ|² = 1`` at t=0 and ``u = 4πN₀a/a_ho``, the
-        mean-field term ``u|ψ|²`` equals ``(4πa/a_ho)·N₀|ψ|²``, i.e. the
-        interaction energy of the *current* atom number N(t) = N₀·‖ψ‖². The
-        reservoir therefore sets N through μ, exactly as intended.
+        Note:
+            **The norm is deliberately left free.** :math:`\mu` enters only as
+            the constant shift ``utot - mu``, so the whole step multiplies
+            :math:`\psi` by the global factor
+            :math:`e^{(i+\gamma)\Delta\tau\mu}`. Renormalising afterwards
+            divides that factor straight back out and leaves nothing but an
+            unobservable global phase: with a forced norm, :math:`\mu` has *no
+            effect whatsoever* on the dynamics and the grand-canonical
+            growth/decay the SGPE is built around simply does not happen.
+
+            Letting the norm evolve is also self-consistent with the units used
+            here. With :math:`\mathrm{d}V \sum \lvert\psi\rvert^2 = 1` at
+            :math:`t = 0` and :math:`u = 4\pi N_0 a / a_\mathrm{ho}`, the
+            mean-field term :math:`u\lvert\psi\rvert^2` equals
+            :math:`(4\pi a / a_\mathrm{ho})\,N_0\lvert\psi\rvert^2`, i.e. the
+            interaction energy of the *current* atom number
+            :math:`N(t) = N_0 \lVert \psi \rVert^2`. The reservoir therefore
+            sets :math:`N` through :math:`\mu`, exactly as intended.
 
         Args:
-            psi (torch.Tensor): Wavefunction (n1, n2, n3), complex double.
-            utot (torch.Tensor): Total mean-field potential V_ext + u|ψ|².
-            mu (float): Reservoir chemical potential μ in units of ħ·ω_ho.
-            gamma (float): Dimensionless damping coefficient γ.
-            dtau (float): Dimensionless time step ω_ho·dt.
-            p_sq (torch.Tensor): Squared momentum grid |p|².
-            d_x (float): Grid cell volume (only used when ``renormalise``).
-            renormalise (bool, optional): Force ∫|ψ|² dV = 1 after the step.
-                This disables the reservoir coupling described above; only use
-                it for a deliberately number-conserving damped GPE. Default
-                ``False``.
+            psi (torch.Tensor): Wavefunction of shape ``(n1, n2, n3)``, complex
+                double.
+            utot (torch.Tensor): Total mean-field potential
+                :math:`V_\mathrm{ext} + u\lvert\psi\rvert^2`.
+            mu (float): Reservoir chemical potential :math:`\mu`, in units of
+                :math:`\hbar\omega_\mathrm{ho}`.
+            gamma (float): Dimensionless damping coefficient :math:`\gamma`.
+            dtau (float): Dimensionless time step
+                :math:`\omega_\mathrm{ho}\,\mathrm{d}t`.
+            p_sq (torch.Tensor): Squared momentum grid
+                :math:`\lvert p \rvert^{2}`.
+            d_x (float): Grid cell volume; only used when ``renormalise`` is
+                set.
+            renormalise (bool, optional): Force
+                :math:`\int \lvert \psi \rvert^{2}\,\mathrm{d}V = 1` after the
+                step. This disables the reservoir coupling described above;
+                only use it for a deliberately number-conserving damped GPE
+                (default ``False``).
 
         Returns:
-            torch.Tensor: Updated wavefunction.
+            torch.Tensor: Updated wavefunction, of the same shape as ``psi``.
         """
         damping = 1j + gamma
         eff_pot = utot - mu
@@ -570,16 +789,17 @@ class GPELibrary:
     def calculate_density_peak(
         psi: torch.Tensor
     ) -> tuple:
-        """
-        Calculate the maximum density and its position in the wavefunction.
+        r"""
+        Find the peak density and where on the grid it sits.
 
         Args:
-            psi (torch.Tensor): BEC normalised wavefunction.
+            psi (torch.Tensor): Normalised BEC wavefunction of shape
+                ``(n1, n2, n3)``.
 
         Returns:
-            tuple: (max_density, peak_indices) where max_density is a scalar tensor
-                   and peak_indices is a tuple of integers (i, j, k) representing
-                   the grid position of the maximum density.
+            tuple: ``(max_density, peak_indices)`` — the peak of
+            :math:`\lvert \psi \rvert^{2}` as a scalar tensor, and the grid
+            position ``(i, j, k)`` at which it occurs.
         """
         density = torch.abs(psi) ** 2
         density_flat = density.flatten()
@@ -595,6 +815,18 @@ class GPELibrary:
         return max_density, (i, j, k)
 
 class GPE2DLibrary(GPELibrary):
+    r"""
+    Extensions of the GPE library for effectively two-dimensional simulations.
+
+    The simulation plane is x–z (grid dimensions ``n1``–``n3``), with the ``y``
+    direction held flat: the tight axis is frozen in its transverse ground
+    state, so the field is stored on the full 3-D grid but is constant along
+    ``n2``. Provides point-vortex and dark-soliton imprinting, the in-plane
+    velocity field, and the density diagnostics the 2-D runs report.
+
+    Inherits every core operator from :class:`GPELibrary`.
+    """
+
     @staticmethod
     def create_vortices(
         vortices: np.ndarray,
@@ -606,36 +838,53 @@ class GPE2DLibrary(GPELibrary):
         n3: int,
         device: torch.device
     ) -> torch.Tensor:
-        """
-        Creates vortices on the condensate by calculating a new phase to be added (2D BEC).
+        r"""
+        Build the phase texture that imprints point vortices on a 2-D
+        condensate.
 
-        The winding is built with the half-angle identity
-        ``atan2(y, r + t) = θ/2`` (r = √(t²+y²)), which is free of the branch
-        cut that a plain ``atan2(y, t)`` would introduce. The identity breaks
-        down only on the negative-t half-axis (y = 0, t < 0), where r + t = 0;
-        those points are assigned the limiting value q·π explicitly.
+        Each vortex of charge :math:`q` contributes a winding of
+        :math:`2\pi q` around its core. It is built with the half-angle
+        identity
 
-        The phase is identical for every y index, so it is computed once on the
-        (n1, n3) plane and broadcast along the second dimension. The previous
-        implementation looped over n1·n3 grid points in Python and indexed the
-        tensor element by element, which dominated the setup cost of a run.
+        .. math::
+
+            2\,\mathrm{atan2}\left(y,\; \rho + t\right) = \theta,
+            \qquad \rho = \sqrt{t^2 + y^2},
+
+        with :math:`t` and :math:`y` measured from the core. Written this way
+        the winding is free of the branch cut that a plain
+        :math:`\mathrm{atan2}(y, t)` would introduce. The identity degenerates
+        only on the negative-:math:`t` half-axis (:math:`y = 0`,
+        :math:`t < 0`), where :math:`\rho + t = 0`; those points are assigned
+        the limiting value :math:`q\pi` explicitly.
+
+        The phase is identical for every ``y`` index, so it is computed once on
+        the ``(n1, n3)`` plane and broadcast along the second dimension. The
+        previous implementation looped over ``n1·n3`` grid points in Python and
+        indexed the tensor element by element, which dominated the setup cost
+        of a run.
 
         Args:
-            vortices (np.ndarray): Shape (3, number_of_vortices), rows are x positions,
-                z positions, vortex charges. Positions are grid offsets relative
-                to the centre of the grid. A flat (3,) array is accepted for a
-                single vortex.
-            x1, x2, x3 (torch.Tensor): Real space axes for each dimension.
-            n1, n2, n3 (int): Number of grid points in each dimension.
-            device (torch.device): Device to allocate tensors (CPU or GPU).
+            vortices (numpy.ndarray): Array of shape
+                ``(3, number_of_vortices)`` whose rows are the x positions, the
+                z positions and the charges. Positions are grid offsets
+                relative to the centre of the grid. A flat ``(3,)`` array is
+                accepted for a single vortex.
+            x1 (torch.Tensor): Real-space axis along the first dimension.
+            x2 (torch.Tensor): Real-space axis along the second dimension.
+            x3 (torch.Tensor): Real-space axis along the third dimension.
+            n1 (int): Number of grid points along the first dimension.
+            n2 (int): Number of grid points along the second dimension.
+            n3 (int): Number of grid points along the third dimension.
+            device (torch.device): Device to allocate the tensors on.
 
         Returns:
-            torch.Tensor: Real phase (n1, n2, n3) to be added to the condensate
-            phase, or None if ``vortices`` is None.
+            torch.Tensor: Real phase of shape ``(n1, n2, n3)`` to be added to
+            the condensate phase, or ``None`` if ``vortices`` is ``None``.
 
         Raises:
-            ValueError: If ``vortices`` is not of shape (3, N) or a vortex sits
-                outside the grid.
+            ValueError: If ``vortices`` is not of shape ``(3, N)``, or if a
+                vortex sits outside the grid.
         """
         if vortices is None:
             return None
@@ -683,15 +932,19 @@ class GPE2DLibrary(GPELibrary):
         psi1: torch.Tensor,
         repetitive_phase: torch.Tensor
     ) -> torch.Tensor:
-        """
-        Re-imprint the wavefunction by adding the repetitive phase (2D BEC).
+        r"""
+        Re-imprint the wavefunction by adding a phase again.
+
+        Used to re-apply a phase texture periodically during a run, e.g. to
+        hold a vortex pattern in place against the dynamics.
 
         Args:
             psi1 (torch.Tensor): Wavefunction of the system.
-            repetitive_phase (torch.Tensor): Repetitive phase to be added.
+            repetitive_phase (torch.Tensor): Real phase to add.
 
         Returns:
-            torch.Tensor: Updated wavefunction.
+            torch.Tensor: Updated wavefunction,
+            :math:`\psi e^{i\theta}`.
         """
         return cu.update_phase(psi1, repetitive_phase)
 
@@ -701,33 +954,46 @@ class GPE2DLibrary(GPELibrary):
         p_grid: tuple,
         density_floor: float = 1e-12
     ) -> tuple:
-        """
-        In-plane superfluid velocity of the condensate, as magnitude and direction.
+        r"""
+        Compute the in-plane superfluid velocity, as magnitude and direction.
 
-        The simulation plane of the 2-D model is x–z (n1–n3), so the in-plane
-        components are v_x and v_z; for a genuinely 2-D field they are the two
-        axes it has. Multiply by ℏ/m for a dimensional velocity.
+        The simulation plane of the 2-D model is x–z (``n1``–``n3``), so the
+        in-plane components are :math:`v_x` and :math:`v_z`; for a genuinely
+        2-D field they are the two axes it has. The result is
 
-        Takes the wavefunction, not the phase
-        -------------------------------------
-        This used to differentiate ``angle(ψ)``. That is wrong wherever the
-        condensate carries circulation: the wrapped phase has a 2π branch cut
-        running out of every vortex core, and because a spectral derivative is
-        global, the discontinuity corrupts the velocity across the entire
-        domain rather than only near the cut. Against an analytic
-        vortex-antivortex field the phase route was off by 146% at the median
-        and 5383% at worst, versus ~5% (grid resolution) for this one. See
-        :meth:`GPELibrary.superfluid_velocity`.
+        .. math::
+
+            \lvert v \rvert = \sqrt{v_x^2 + v_z^2},
+            \qquad
+            \arg v = \mathrm{atan2}(v_z, v_x),
+
+        in dimensionless units — multiply by :math:`\hbar/m` for a dimensional
+        velocity.
+
+        Note:
+            **Takes the wavefunction, not the phase.** This used to
+            differentiate ``angle(psi)``, which is wrong wherever the
+            condensate carries circulation: the wrapped phase has a
+            :math:`2\pi` branch cut running out of every vortex core, and
+            because a spectral derivative is global, the discontinuity corrupts
+            the velocity across the entire domain rather than only near the
+            cut. Against an analytic vortex-antivortex field the phase route
+            was off by 146% at the median and 5383% at worst, versus about 5%
+            (grid resolution) for this one. See
+            :meth:`GPELibrary.superfluid_velocity`.
 
         Args:
             psi (torch.Tensor): Condensate wavefunction.
             p_grid (tuple): Momentum axes or meshgrids, one per dimension of
                 ``psi``.
             density_floor (float, optional): Threshold relative to the peak
-                density below which the velocity is reported as zero.
+                density below which the velocity is reported as zero (default
+                ``1e-12``).
 
         Returns:
-            tuple: (|v| in the plane, direction of v as atan2(v_z, v_x)).
+            tuple[torch.Tensor, torch.Tensor]: The in-plane speed
+            :math:`\lvert v \rvert` and its direction, each of the same shape
+            as ``psi``.
         """
         # x–z for a 3-D array; the only two axes of a genuinely 2-D one.
         in_plane = (0, 2) if psi.dim() == 3 else (0, 1)
@@ -741,16 +1007,27 @@ class GPE2DLibrary(GPELibrary):
         center: list,
         space_grid: tuple
     ) -> torch.Tensor:
-        """
-        Calculate the RMS radius of the condensate.
+        r"""
+        Compute the RMS radius of the condensate about a given centre.
+
+        .. math::
+
+            r_\mathrm{rms} = \sqrt{
+                \frac{\int \lvert \mathbf{r} - \mathbf{r}_0 \rvert^{2}
+                      \lvert \psi \rvert^{2}\,\mathrm{d}V}
+                     {\int \lvert \psi \rvert^{2}\,\mathrm{d}V}}
+
+        The cell volume cancels between numerator and denominator and is
+        therefore omitted.
 
         Args:
-            psi (torch.Tensor): Normalized wavefunction.
-            center (list): Centers of the space axes (x1, x2, x3).
-            space_grid (tuple): Meshgrid of the space.
+            psi (torch.Tensor): Normalised wavefunction.
+            center (list): Centre :math:`\mathbf{r}_0` as
+                ``(center_x, center_y, center_z)``, in real-space units.
+            space_grid (tuple): Real-space meshgrids ``(g_x, g_y, g_z)``.
 
         Returns:
-            torch.Tensor: RMS radius of the condensate.
+            torch.Tensor: Scalar RMS radius of the condensate.
         """
         center_x, center_y, center_z = center
         # Use sum of probability densities as the normalization factor for weighted
@@ -778,43 +1055,51 @@ class GPE2DLibrary(GPELibrary):
         greyness: list = None,
         device: torch.device = torch.device("cpu"),
     ) -> torch.Tensor:
-        """
-        Create a multiplicative dark-soliton profile for the wavefunction.
+        r"""
+        Build a multiplicative dark-soliton profile for the wavefunction.
 
         Each soliton is a stripe of suppressed density across the condensate.
-        The profile for a single dark soliton along coordinate *r* is
+        The profile for a single soliton along a coordinate :math:`s` is
 
-            f(r) = cos(alpha) * tanh( cos(alpha) * (r - r0) / width ) + i * sin(alpha)
+        .. math::
 
-        where ``alpha = 0`` gives a stationary black soliton (full density dip
-        plus a pi phase jump) and ``0 < alpha < pi/2`` gives a grey (moving)
-        soliton with a shallower dip.
+            f(s) = \cos\alpha\,
+                   \tanh\!\left(\frac{\cos\alpha\,(s - s_0)}{w}\right)
+                   + i \sin\alpha ,
 
-        When multiple solitons are requested the individual profiles are
-        multiplied together.
+        where :math:`\alpha = 0` gives a stationary black soliton (a full
+        density dip plus a :math:`\pi` phase jump) and
+        :math:`0 < \alpha < \pi/2` gives a grey — that is, moving — soliton
+        with a shallower dip and a smaller phase step. When several solitons
+        are requested their profiles are multiplied together.
 
         Args:
-            x1 (torch.Tensor): 1-D real-space axis along the first grid dimension.
-            x3 (torch.Tensor): 1-D real-space axis along the third grid dimension.
-            n1, n2, n3 (int): Number of grid points in each dimension.
-            positions (list[float]): Centre positions of each soliton (in the
-                same units as the corresponding axis).
-            widths (list[float]): Characteristic width of each soliton.  For a
-                BEC this is typically the healing length xi.
-            axes (list[int]): Axis for each soliton: ``1`` for x (stripe
-                perpendicular to x1) or ``3`` for z (stripe perpendicular to x3).
-            greyness (list[float], optional): Grey-soliton angle alpha for
-                each soliton in radians.  ``0`` = black (default), values up
-                to ``pi/2`` make the soliton progressively greyer / faster.
-            device (torch.device): Device for the output tensor.
+            x1 (torch.Tensor): Real-space axis along the first grid dimension.
+            x3 (torch.Tensor): Real-space axis along the third grid dimension.
+            n1 (int): Number of grid points along the first dimension.
+            n2 (int): Number of grid points along the second dimension.
+            n3 (int): Number of grid points along the third dimension.
+            positions (list[float]): Centre :math:`s_0` of each soliton, in the
+                same units as the corresponding axis.
+            widths (list[float]): Characteristic width :math:`w` of each
+                soliton. For a BEC this is typically the healing length
+                :math:`\xi`.
+            axes (list[int]): Axis for each soliton: ``1`` for x (a stripe
+                perpendicular to ``x1``) or ``3`` for z (perpendicular to
+                ``x3``).
+            greyness (list[float], optional): Grey-soliton angle
+                :math:`\alpha` for each soliton, in radians. ``0`` is black
+                (the default); values up to :math:`\pi/2` make the soliton
+                progressively greyer and faster.
+            device (torch.device, optional): Device for the output tensor.
 
         Returns:
-            torch.Tensor: Complex-valued tensor of shape ``(n1, n2, n3)`` to
-            be multiplied element-wise with the wavefunction.
+            torch.Tensor: Complex tensor of shape ``(n1, n2, n3)``, to be
+            multiplied element-wise with the wavefunction.
 
         Raises:
             ValueError: If the per-soliton lists have inconsistent lengths, or
-                an axis is neither 1 nor 3.
+                if an axis is neither ``1`` nor ``3``.
         """
         n_solitons = len(positions)
         if greyness is None:
@@ -857,15 +1142,16 @@ class GPE2DLibrary(GPELibrary):
         psi: torch.Tensor,
         soliton_mask: torch.Tensor,
     ) -> torch.Tensor:
-        """
+        r"""
         Apply a dark-soliton mask to the wavefunction.
 
-        Unlike vortex imprinting (which adds pure phase), this multiplies
-        the wavefunction by a complex profile that modifies both amplitude
-        and phase simultaneously.
+        Unlike vortex imprinting, which adds pure phase, this multiplies the
+        wavefunction by a complex profile and so modifies the amplitude and the
+        phase at once.
 
         Args:
-            psi (torch.Tensor): Current wavefunction (n1, n2, n3).
+            psi (torch.Tensor): Current wavefunction of shape
+                ``(n1, n2, n3)``.
             soliton_mask (torch.Tensor): Profile returned by
                 :meth:`create_dark_soliton`.
 
@@ -879,25 +1165,35 @@ class GPE2DLibrary(GPELibrary):
         psi: torch.Tensor,
         axis: int = 1
     ) -> torch.Tensor:
-        """
-        Calculate the column density on a line that crosses the condensate.
+        r"""
+        Compute the column density along a line crossing the condensate.
 
         The line runs *along* the requested axis through the centre of the
-        grid, with the trivial y direction (n2) integrated out:
+        grid, with the trivial ``y`` direction (``n2``) integrated out:
 
-            axis=1 → n(x) = Σ_y |ψ[:, :, n3//2]|²   (length n1)
-            axis=2 → n(z) = Σ_y |ψ[n1//2, :, :]|²   (length n3)
+        .. math::
+
+            \text{axis} = 1:\quad
+                n(x) = \sum_y \lvert \psi[:, :, n_3/2] \rvert^{2}
+                \quad(\text{length } n_1),
+
+        .. math::
+
+            \text{axis} = 2:\quad
+                n(z) = \sum_y \lvert \psi[n_1/2, :, :] \rvert^{2}
+                \quad(\text{length } n_3).
 
         Args:
-            psi (torch.Tensor): BEC wavefunction.
-            axis (int, optional): Axis the line runs along (1 for x, 2 for z).
-                Default is 1.
+            psi (torch.Tensor): BEC wavefunction of shape ``(n1, n2, n3)``.
+            axis (int, optional): Axis the line runs along — ``1`` for x,
+                ``2`` for z (default ``1``).
 
         Returns:
-            torch.Tensor: Cross-section line through the center of the BEC.
+            torch.Tensor: The 1-D cross-section line through the centre of the
+            condensate.
 
         Raises:
-            ValueError: If ``axis`` is neither 1 nor 2.
+            ValueError: If ``axis`` is neither ``1`` nor ``2``.
         """
         n1, n2, n3 = psi.shape
         if axis == 1:
@@ -907,12 +1203,15 @@ class GPE2DLibrary(GPELibrary):
         raise ValueError(f"axis must be 1 (x) or 2 (z); got {axis}")
 
 class GPE3DLibrary(GPELibrary):
-    """
-    Extensions of the GPE library for fully three-dimensional BEC simulations.
+    r"""
+    Extensions of the GPE library for fully three-dimensional simulations.
 
-    Provides tools for 3D-specific topological structures (vortex rings,
-    vortex lines), density diagnostics (column densities, 2D slices), and
-    observables (superfluid velocity field, angular momentum components).
+    Provides the topological structures that only exist in 3-D (vortex rings
+    and vortex lines), the density diagnostics that reduce a 3-D field to
+    something viewable (column densities, 2-D slices), and the observables
+    (the full superfluid velocity field, the angular momentum components).
+
+    Inherits every core operator from :class:`GPELibrary`.
     """
 
     @staticmethod
@@ -929,32 +1228,48 @@ class GPE3DLibrary(GPELibrary):
         charge: int = 1,
         device: torch.device = torch.device("cpu"),
     ) -> torch.Tensor:
-        """
-        Create the phase texture for a quantized vortex ring.
+        r"""
+        Build the phase texture for a quantised vortex ring.
 
-        The ring is a circle of radius ``ring_radius`` centred at ``center``
-        lying in the plane perpendicular to ``axis``.  The phase winds by
-        2π * charge around the vortex core (the ring itself) using toroidal
-        coordinates:
+        The ring is a circle of radius :math:`R` centred at ``center``, lying
+        in the plane perpendicular to ``axis``. The phase winds by
+        :math:`2\pi q` around the core — the ring itself — which in toroidal
+        coordinates is
 
-            phi = atan2(x_axis - c_axis, rho - ring_radius)
+        .. math::
 
-        where rho is the cylindrical radius in the plane of the ring.
+            \theta = q\,\mathrm{atan2}\left(
+                x_\parallel - c_\parallel,\; \rho - R\right),
+
+        where :math:`x_\parallel` is the coordinate along ``axis`` and
+        :math:`\rho` is the cylindrical radius in the plane of the ring.
 
         Args:
-            x1, x2, x3 (torch.Tensor): 1-D real-space axes.
-            n1, n2, n3 (int): Grid point counts per dimension.
-            ring_radius (float): Radius of the vortex ring, in the same units
-                as the real-space axes.
-            center (tuple): (c1, c2, c3) – 3-D centre of the ring, in the same
-                real-space units as x1, x2, x3 (not grid indices).
-            axis (int): 1, 2, or 3 – axis the ring encircles (ring lies in the
-                perpendicular plane).
-            charge (int): Topological charge (winding number). Default 1.
-            device (torch.device): Computation device.
+            x1 (torch.Tensor): Real-space axis along the first dimension.
+            x2 (torch.Tensor): Real-space axis along the second dimension.
+            x3 (torch.Tensor): Real-space axis along the third dimension.
+            n1 (int): Number of grid points along the first dimension.
+            n2 (int): Number of grid points along the second dimension.
+            n3 (int): Number of grid points along the third dimension.
+            ring_radius (float): Radius :math:`R` of the ring, in the same
+                units as the real-space axes.
+            center (tuple): Centre ``(c1, c2, c3)`` of the ring, in real-space
+                units rather than grid indices.
+            axis (int): ``1``, ``2`` or ``3`` — the axis the ring encircles;
+                the ring lies in the perpendicular plane.
+            charge (int, optional): Topological charge :math:`q`, i.e. the
+                winding number (default ``1``).
+            device (torch.device, optional): Computation device.
 
         Returns:
-            torch.Tensor: Real phase tensor of shape (n1, n2, n3).
+            torch.Tensor: Real phase tensor of shape ``(n1, n2, n3)``.
+
+        Raises:
+            ValueError: If ``axis`` is not ``1``, ``2`` or ``3``.
+
+        Note:
+            ``atan2`` is defined everywhere, including at
+            ``atan2(0, 0) = 0``, so no NaN filtering is needed at the core.
         """
         if axis not in (1, 2, 3):
             raise ValueError(f"axis must be 1, 2, or 3; got {axis}")
@@ -990,26 +1305,40 @@ class GPE3DLibrary(GPELibrary):
         axis: int,
         device: torch.device = torch.device("cpu"),
     ) -> torch.Tensor:
-        """
-        Create the phase texture for one or more straight vortex lines.
+        r"""
+        Build the phase texture for one or more straight vortex lines.
 
-        Each vortex line runs parallel to ``axis``.  Its core intersects the
-        perpendicular plane at the coordinate pair given in ``positions``:
+        Each line runs parallel to ``axis`` and contributes a winding
+        :math:`q\,\mathrm{atan2}(\delta_b, \delta_a)` about its core, where
+        :math:`(\delta_a, \delta_b)` is the offset from the core in the
+        perpendicular plane. The core intersects that plane at the coordinate
+        pair given in ``positions``:
 
-        - axis=1: each position is (c2, c3)
-        - axis=2: each position is (c1, c3)
-        - axis=3: each position is (c1, c2)
+        - ``axis=1``: each position is ``(c2, c3)``;
+        - ``axis=2``: each position is ``(c1, c3)``;
+        - ``axis=3``: each position is ``(c1, c2)``.
 
         Args:
-            x1, x2, x3 (torch.Tensor): 1-D real-space axes.
-            n1, n2, n3 (int): Grid point counts.
+            x1 (torch.Tensor): Real-space axis along the first dimension.
+            x2 (torch.Tensor): Real-space axis along the second dimension.
+            x3 (torch.Tensor): Real-space axis along the third dimension.
+            n1 (int): Number of grid points along the first dimension.
+            n2 (int): Number of grid points along the second dimension.
+            n3 (int): Number of grid points along the third dimension.
             positions (list[tuple]): Core positions in the perpendicular plane.
-            charges (list[int]): Topological charges for each line.
-            axis (int): 1, 2, or 3 – axis the vortex lines run along.
-            device (torch.device): Computation device.
+            charges (list[int]): Topological charge of each line.
+            axis (int): ``1``, ``2`` or ``3`` — the axis the lines run along.
+            device (torch.device, optional): Computation device.
 
         Returns:
-            torch.Tensor: Real phase tensor of shape (n1, n2, n3).
+            torch.Tensor: Real phase tensor of shape ``(n1, n2, n3)``.
+
+        Raises:
+            ValueError: If ``axis`` is not ``1``, ``2`` or ``3``.
+
+        Note:
+            ``atan2`` is defined everywhere, including at
+            ``atan2(0, 0) = 0``, so no NaN filtering is needed at the core.
         """
         if axis not in (1, 2, 3):
             raise ValueError(f"axis must be 1, 2, or 3; got {axis}")
@@ -1037,18 +1366,26 @@ class GPE3DLibrary(GPELibrary):
         axis: int,
         d_axis: float = 1.0,
     ) -> torch.Tensor:
-        """
-        Compute the column density by integrating |psi|² along the given axis.
+        r"""
+        Compute the column density by integrating the density along one axis.
+
+        .. math::
+
+            n(\mathbf{r}_\perp) = \int \lvert \psi \rvert^{2}\,
+                \mathrm{d}x_\mathrm{axis}
 
         Args:
-            psi (torch.Tensor): BEC wavefunction (n1, n2, n3).
-            axis (int): 1, 2, or 3 – axis to integrate along.
-            d_axis (float, optional): Grid spacing along ``axis``. Pass it to
-                get a true line integral ∫|ψ|² dx_axis; the default of 1.0
-                returns the bare sum over grid points.
+            psi (torch.Tensor): BEC wavefunction of shape ``(n1, n2, n3)``.
+            axis (int): ``1``, ``2`` or ``3`` — the axis to integrate along.
+            d_axis (float, optional): Grid spacing along ``axis``. Pass it for
+                a true line integral; the default of ``1.0`` returns the bare
+                sum over grid points.
 
         Returns:
-            torch.Tensor: 2-D column density tensor in the remaining plane.
+            torch.Tensor: The 2-D column density in the remaining plane.
+
+        Raises:
+            ValueError: If ``axis`` is not ``1``, ``2`` or ``3``.
         """
         if axis not in (1, 2, 3):
             raise ValueError(f"axis must be 1, 2, or 3; got {axis}")
@@ -1060,17 +1397,21 @@ class GPE3DLibrary(GPELibrary):
         axis: int,
         index: int = None,
     ) -> torch.Tensor:
-        """
+        r"""
         Extract a 2-D density slice orthogonal to the given axis.
 
         Args:
-            psi (torch.Tensor): BEC wavefunction (n1, n2, n3).
-            axis (int): 1, 2, or 3 – normal axis of the slice.
+            psi (torch.Tensor): BEC wavefunction of shape ``(n1, n2, n3)``.
+            axis (int): ``1``, ``2`` or ``3`` — the normal axis of the slice.
             index (int, optional): Grid index along ``axis``. Defaults to the
                 centre of that axis.
 
         Returns:
-            torch.Tensor: 2-D density slice.
+            torch.Tensor: The 2-D density slice
+            :math:`\lvert \psi \rvert^{2}` at that index.
+
+        Raises:
+            ValueError: If ``axis`` is not ``1``, ``2`` or ``3``.
         """
         if axis not in (1, 2, 3):
             raise ValueError(f"axis must be 1, 2, or 3; got {axis}")
@@ -1089,32 +1430,38 @@ class GPE3DLibrary(GPELibrary):
         p_grid: tuple,
         density_floor: float = 1e-12,
     ) -> tuple:
-        """
-        Compute the 3-D superfluid velocity field using spectral derivatives.
+        r"""
+        Compute the full 3-D superfluid velocity field.
 
-        In dimensionless units (ℏ/m = 1) the superfluid velocity is:
+        In dimensionless units (:math:`\hbar/m = 1`),
 
-            v_i = Im( ψ* ∂_i ψ ) / |ψ|²
+        .. math::
 
-        where the spatial derivative is evaluated spectrally.
+            v_i = \frac{\mathrm{Im}\left(\psi^{*}\,
+                \partial_i \psi\right)}{\lvert \psi \rvert^{2}} ,
+
+        with the spatial derivatives evaluated spectrally. See
+        :meth:`GPELibrary.superfluid_velocity`, which this delegates to, for
+        why the derivative is taken of :math:`\psi` rather than of its phase.
 
         The velocity is undefined where there is no condensate. In floating
         point the density is essentially never exactly zero, so a bare
-        ``density > 0`` test lets the dilute tail (n ~ 1e-30) produce enormous
-        meaningless velocities. The cut is therefore taken *relative* to the
-        peak density, and the division itself is guarded so that no inf/NaN is
-        generated in the discarded region.
+        ``density > 0`` test lets the dilute tail (:math:`n \sim 10^{-30}`)
+        produce enormous meaningless velocities. The cut is therefore taken
+        *relative* to the peak density, and the division itself is guarded so
+        that no inf/NaN is generated in the discarded region.
 
         Args:
-            psi (torch.Tensor): BEC wavefunction (n1, n2, n3).
-            p_grid (tuple): (px, py, pz) – 3-D momentum meshgrids (1-D axes are
-                also accepted).
-            density_floor (float, optional): Density threshold relative to the
-                peak density below which the velocity is reported as zero.
-                Default 1e-12.
+            psi (torch.Tensor): BEC wavefunction of shape ``(n1, n2, n3)``.
+            p_grid (tuple): Momentum meshgrids ``(px, py, pz)``; 1-D axes are
+                also accepted.
+            density_floor (float, optional): Threshold relative to the peak
+                density below which the velocity is reported as zero (default
+                ``1e-12``).
 
         Returns:
-            tuple: (v1, v2, v3) – velocity component tensors, each (n1, n2, n3).
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor]: The velocity
+            components ``(v1, v2, v3)``, each of shape ``(n1, n2, n3)``.
         """
         return tuple(GPELibrary.superfluid_velocity(
             psi, p_grid, density_floor=density_floor))
@@ -1127,29 +1474,52 @@ class GPE3DLibrary(GPELibrary):
         component: int,
         d_x: float,
     ) -> torch.Tensor:
-        """
-        Calculate the expectation value of one angular momentum component.
+        r"""
+        Compute the expectation value of one angular momentum component.
 
-        In units of ℏ:
+        In units of :math:`\hbar`,
 
-            ⟨L_1⟩ = ⟨ψ | -i(x2 ∂_3 - x3 ∂_2) | ψ⟩
-            ⟨L_2⟩ = ⟨ψ | -i(x3 ∂_1 - x1 ∂_3) | ψ⟩
-            ⟨L_3⟩ = ⟨ψ | -i(x1 ∂_2 - x2 ∂_1) | ψ⟩
+        .. math::
 
-        Spatial derivatives are evaluated spectrally. As with the energies, the
-        expectation value is an integral, so the sum carries the cell volume
-        ``d_x`` — ψ is normalised as ``d_x·Σ|ψ|² = 1``.
+            \langle L_1 \rangle = \langle \psi \lvert
+                -i\left(x_2 \partial_3 - x_3 \partial_2\right)
+                \rvert \psi \rangle,
+
+        .. math::
+
+            \langle L_2 \rangle = \langle \psi \lvert
+                -i\left(x_3 \partial_1 - x_1 \partial_3\right)
+                \rvert \psi \rangle,
+
+        .. math::
+
+            \langle L_3 \rangle = \langle \psi \lvert
+                -i\left(x_1 \partial_2 - x_2 \partial_1\right)
+                \rvert \psi \rangle .
+
+        The spatial derivatives are evaluated spectrally. As with the energies,
+        the expectation value is an integral, so the sum carries the cell
+        volume ``d_x`` — :math:`\psi` is normalised as
+        :math:`\mathrm{d}V \sum \lvert\psi\rvert^2 = 1`.
 
         Args:
-            psi (torch.Tensor): Normalised BEC wavefunction (n1, n2, n3).
-            space_grid (tuple): (g_x, g_y, g_z) – 3-D real-space meshgrids.
-            p_grid (tuple): (px, py, pz) – 3-D momentum meshgrids (1-D axes are
-                also accepted).
-            component (int): 1, 2, or 3.
-            d_x (float): Grid cell volume (product of dx in each dimension).
+            psi (torch.Tensor): Normalised BEC wavefunction of shape
+                ``(n1, n2, n3)``.
+            space_grid (tuple): Real-space meshgrids ``(g_x, g_y, g_z)``.
+            p_grid (tuple): Momentum meshgrids ``(px, py, pz)``; 1-D axes are
+                also accepted.
+            component (int): ``1``, ``2`` or ``3`` — which component to
+                compute.
+            d_x (float): Grid cell volume (the product of ``dx`` over the
+                dimensions).
 
         Returns:
-            torch.Tensor: Scalar expectation value ⟨L_component⟩ (in ℏ).
+            torch.Tensor: Scalar expectation value
+            :math:`\langle L_\mathrm{component} \rangle`, in units of
+            :math:`\hbar`.
+
+        Raises:
+            ValueError: If ``component`` is not ``1``, ``2`` or ``3``.
         """
         if component not in (1, 2, 3):
             raise ValueError(f"component must be 1, 2, or 3; got {component}")

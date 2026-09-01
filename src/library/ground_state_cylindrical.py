@@ -1,25 +1,47 @@
-"""Ground-state solver for the GPE in cylindrical coordinates.
+r"""
+Ground-state solver for the GPE in cylindrical coordinates :math:`(r, \varphi, z)`.
 
-Drop-in cylindrical counterpart to :mod:`src.library.ground_state`.
+Drop-in cylindrical counterpart to :mod:`src.library.ground_state`: same
+imaginary-time steepest descent, same convergence criteria, same file format,
+with two substitutions that follow from the geometry.
 
-Algorithm
----------
-Imaginary-time propagation via a steepest-descent (gradient-flow) scheme
-identical to the Cartesian version, but every inner product and norm uses the
-cylindrical volume element dV = r dr dφ dz, and the kinetic operator is
-applied spectrally in (φ, z) and via the precomputed radial eigendecomposition
-in r (see :class:`GPECylindricalLibrary`).
+Every inner product and norm uses the cylindrical volume element
+
+.. math::
+
+    \mathrm{d}V = r\,\mathrm{d}r\,\mathrm{d}\varphi\,\mathrm{d}z ,
+
+and the kinetic operator is applied spectrally in :math:`\varphi` and
+:math:`z` but through a precomputed radial eigendecomposition in :math:`r`,
+since the radial Laplacian is not diagonal in any Fourier basis (see
+:class:`~src.library.gpe_cylindrical_library.GPECylindricalLibrary`). The
+update rule itself is unchanged,
+
+.. math::
+
+    \psi \leftarrow \mathcal{N}\Bigl[
+        \psi - \Delta\tau\,\bigl(H[\psi] - \mu\bigr)\psi
+    \Bigr],
+    \qquad
+    \mu = \langle \psi \lvert H \rvert \psi \rangle .
 
 Expected ``system.simulation_parameters`` keys
------------------------------------------------
-Grid_resolution : (n_r, n_phi, n_z)
-r_max           : outer radial boundary (same units as a_ho).
-z_min, z_max    : axial extent.
-a_ho            : harmonic oscillator length (m) — used to set u and dtau.
+----------------------------------------------
 
-The cylindrical grid (r, φ, z, kz, m_modes, spacings) and the radial
-eigendecomposition are built inside :meth:`find_ground_state` from the above
-parameters, so no extra pre-computation is required by the caller.
+``Grid_resolution``
+    Tuple ``(n_r, n_phi, n_z)`` — number of grid points along each direction.
+``r_max``
+    Outer radial boundary, in the same units as ``a_ho``.
+``z_min``, ``z_max``
+    Axial extent of the box.
+``a_ho``
+    Harmonic oscillator length, in metres — used to derive :math:`u` when the
+    configuration does not already supply it.
+
+The cylindrical grid (:math:`r`, :math:`\varphi`, :math:`z`, :math:`k_z`, the
+azimuthal modes and the spacings) and the radial eigendecomposition are both
+built inside :meth:`CylindricalGroundState.find_ground_state` from those
+parameters, so the caller has nothing to precompute.
 """
 
 import math
@@ -32,6 +54,16 @@ from src.utils.read_write_utils import write_psi
 
 
 class CylindricalGroundState:
+    r"""
+    Imaginary-time ground-state solver on a cylindrical grid.
+
+    A namespace of static methods mirroring
+    :class:`~src.library.ground_state.GroundState`:
+    :meth:`find_ground_state` drives the descent and writes the result to disk,
+    :meth:`steepest_descent` performs a single iteration, :meth:`apply_kinetic`
+    supplies the cylindrical kinetic operator that replaces the Cartesian FFT
+    step, and :meth:`read_ground_state` loads a state back from a file.
+    """
 
     # ------------------------------------------------------------------
     # Kinetic operator action
@@ -46,30 +78,56 @@ class CylindricalGroundState:
         eigvecs_dict: dict,
         eigvals_dict: dict,
     ) -> torch.Tensor:
-        """
-        Apply the kinetic operator T to ψ in cylindrical coordinates.
+        r"""
+        Apply the kinetic operator :math:`T` to a wavefunction in cylindrical
+        coordinates.
 
-        T ψ = T_r^m ψ + T_z ψ
+        The azimuthal direction is periodic, so a DFT over :math:`\varphi`
+        block-diagonalises the Laplacian: each azimuthal mode :math:`m` sees
+        its own radial operator, and the kinetic term splits as
 
-        For each azimuthal mode m (obtained by DFT over φ):
-          - T_r^m is applied via the precomputed eigendecomposition:
-                T_r^m ψ_m = (1/√r) V_m Λ_m V_m^T (√r ψ_m)
-          - T_z is applied spectrally:
-                T_z ψ_m = IFFT(kz²/2 · FFT(ψ_m))
+        .. math::
 
-        This replaces the Cartesian IFFT(p²/2 · FFT(ψ)) used in the Cartesian
-        steepest descent.
+            T\psi = T_r^{m}\psi + T_z\psi .
+
+        The radial part is applied through the eigendecomposition precomputed
+        by
+        :meth:`~src.library.gpe_cylindrical_library.GPECylindricalLibrary.build_radial_operators`,
+        with the :math:`\sqrt{r}` similarity transform that makes the radial
+        operator symmetric,
+
+        .. math::
+
+            T_r^{m}\psi_m = \frac{1}{\sqrt{r}}\,
+                V_m \Lambda_m V_m^{\mathsf{T}}
+                \left(\sqrt{r}\,\psi_m\right),
+
+        while the axial part stays spectral,
+
+        .. math::
+
+            T_z \psi_m = \mathcal{F}^{-1}\!\left[
+                \tfrac{1}{2} k_z^2\, \mathcal{F}[\psi_m]\right].
+
+        Together these replace the single Cartesian step
+        :math:`\mathcal{F}^{-1}[\tfrac{1}{2}p^2 \mathcal{F}[\psi]]`.
 
         Args:
-            psi           : wavefunction (n_r, n_phi, n_z), complex.
-            kz            : z-momentum grid (n_z,).
-            m_modes       : azimuthal mode indices (n_phi,), DFT order.
-            r             : radial grid (n_r,).
-            eigvecs_dict  : {|m|: (n_r, n_r)} from build_radial_operators.
-            eigvals_dict  : {|m|: (n_r,)}   from build_radial_operators.
+            psi (torch.Tensor): Complex wavefunction of shape
+                ``(n_r, n_phi, n_z)``.
+            kz (torch.Tensor): Axial momentum grid, of shape ``(n_z,)``.
+            m_modes (torch.Tensor): Azimuthal mode indices in DFT order, of
+                shape ``(n_phi,)``.
+            r (torch.Tensor): Radial grid, of shape ``(n_r,)``.
+            eigvecs_dict (dict): Eigenvectors of the radial operator, keyed by
+                the absolute azimuthal index and of shape ``(n_r, n_r)`` each,
+                as returned by ``build_radial_operators``.
+            eigvals_dict (dict): Matching eigenvalues, keyed the same way and
+                of shape ``(n_r,)`` each.
 
         Returns:
-            T|ψ⟩ — tensor of shape (n_r, n_phi, n_z).
+            torch.Tensor: The kinetic term :math:`T\psi`, of shape
+            ``(n_r, n_phi, n_z)``.
         """
         n_r, n_phi, n_z = psi.shape
         sqrt_r = torch.sqrt(r).to(device=psi.device, dtype=torch.float64)
@@ -112,30 +170,63 @@ class CylindricalGroundState:
         dz: float,
         u: float,
     ) -> tuple:
-        """
-        One imaginary-time steepest-descent step in cylindrical coordinates.
+        r"""
+        Advance the imaginary-time solver by one steepest-descent step.
 
-        Mirrors :meth:`GroundState.steepest_descent` exactly, replacing:
-          - the Cartesian kinetic step IFFT(p²/2·FFT(ψ)) with
-            :meth:`apply_kinetic` (cylindrical Laplacian),
-          - the flat volume element d_x with r dr dφ dz in all inner products.
+        Mirrors :meth:`~src.library.ground_state.GroundState.steepest_descent`
+        exactly, with two substitutions: the Cartesian kinetic step
+        :math:`\mathcal{F}^{-1}[\tfrac{1}{2}p^2\mathcal{F}[\psi]]` becomes
+        :meth:`apply_kinetic`, and the flat volume element becomes
+        :math:`r\,\mathrm{d}r\,\mathrm{d}\varphi\,\mathrm{d}z` in every inner
+        product. The step itself is
 
-        The update rule is:
-            ψ ← ψ − Δτ (H − μ) ψ    then re-normalise.
+        .. math::
+
+            \mu = \int \psi^{*} H\psi\; r\,\mathrm{d}r\,\mathrm{d}\varphi\,
+                       \mathrm{d}z,
+            \qquad
+            \psi \leftarrow \mathcal{N}\!\left[
+                \psi - \Delta\tau\,(H - \mu)\psi\right],
+
+        with the diagnostics
+
+        .. math::
+
+            \mathrm{tol} = \int \lvert (H - \mu)\psi \rvert^{2}\,
+                r\,\mathrm{d}r\,\mathrm{d}\varphi\,\mathrm{d}z,
+            \qquad
+            E = \mu - \frac{u}{2} \int \lvert \psi \rvert^{4}\,
+                r\,\mathrm{d}r\,\mathrm{d}\varphi\,\mathrm{d}z .
+
+        Note:
+            :math:`H` is Hermitian, so :math:`\mu` is real and its real part is
+            taken directly. Taking the modulus instead would silently flip the
+            sign of a negative chemical potential and drive the descent the
+            wrong way.
 
         Args:
-            psi                     : current wavefunction (n_r, n_phi, n_z).
-            dtau                    : imaginary-time step.
-            kz                      : z-momentum grid.
-            m_modes                 : azimuthal mode indices.
-            r                       : radial grid.
-            eigvecs_dict, eigvals_dict : from build_radial_operators.
-            uext                    : external trapping potential.
-            dr, dphi, dz            : grid spacings.
-            u                       : contact interaction strength.
+            psi (torch.Tensor): Current wavefunction, of shape
+                ``(n_r, n_phi, n_z)``.
+            dtau (float): Imaginary-time step :math:`\Delta\tau`.
+            kz (torch.Tensor): Axial momentum grid.
+            m_modes (torch.Tensor): Azimuthal mode indices in DFT order.
+            r (torch.Tensor): Radial grid.
+            eigvecs_dict (dict): Eigenvectors of the radial operator, from
+                ``build_radial_operators``.
+            eigvals_dict (dict): Matching eigenvalues.
+            uext (torch.Tensor): External trapping potential on the cylindrical
+                grid.
+            dr (float): Radial grid spacing.
+            dphi (float): Azimuthal grid spacing.
+            dz (float): Axial grid spacing.
+            u (float): Contact-interaction strength :math:`u`.
 
         Returns:
-            (psi, energy, tol, mu) — updated wavefunction and scalar diagnostics.
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+            The updated normalised wavefunction, the total energy estimate
+            :math:`E`, the residual norm used as the convergence metric, and
+            the chemical potential :math:`\mu`. The three scalar diagnostics
+            are zero-dimensional tensors on the same device as ``psi``.
         """
         r_w = r.reshape(-1, 1, 1)
         dV = dr * dphi * dz
@@ -176,41 +267,63 @@ class CylindricalGroundState:
 
     @staticmethod
     def find_ground_state(sim_params, system, file_name, device, max_iterations=200000):
-        """
+        r"""
         Compute and persist the cylindrical ground-state wavefunction.
 
-        The initial state is seeded with a Thomas-Fermi profile and refined by
-        imaginary-time steepest descent until the residual norm falls below
-        1e-5 or the relative energy change vanishes.
+        Builds the cylindrical grid and the radial operators, seeds the state
+        with a Thomas-Fermi profile,
 
-        Expected ``system.simulation_parameters`` keys
-        -----------------------------------------------
-        Grid_resolution : (n_r, n_phi, n_z)
-        r_max           : outer radial boundary.
-        z_min, z_max    : axial extent.
-        a_ho            : harmonic oscillator length (m).
+        .. math::
 
-        Parameters
-        ----------
-        sim_params : dict
-            Simulation configuration. Only the interaction strength ``u`` is
-            read from here (falling back to the value derived from
-            :class:`CONSTANTS` when absent).
-        system : object
-            System object with ``simulation_parameters`` dict and
-            ``system.uext.potential`` giving the external potential on the
-            (n_r, n_phi, n_z) cylindrical grid.
-        file_name : str
-            Output path for the serialised ground state.
-        device : torch.device
-        max_iterations : int
-            Hard cap on descent iterations so a state that never meets the
-            tolerance cannot spin forever.
+            \psi_\mathrm{TF} = \sqrt{\max(\mu_\mathrm{TF} - V_\mathrm{ext}, 0)},
+            \qquad
+            \mu_\mathrm{TF} = \frac{1}{2}
+                \left(\frac{15\,u}{4\pi}\right)^{2/5},
 
-        Returns
-        -------
-        torch.Tensor
-            Normalised complex wavefunction of shape (n_r, n_phi, n_z).
+        then refines it with :meth:`steepest_descent` until the residual norm
+        drops below ``1e-5`` or the relative energy change vanishes. Stability
+        of the explicit gradient flow requires a step well below the square of
+        the smallest spacing, hence
+        :math:`\Delta\tau = 0.05\,\min(\mathrm{d}r, \mathrm{d}z)^2`, halved
+        whenever the energy goes *up*.
+
+        The required ``system.simulation_parameters`` keys are listed in the
+        module docstring.
+
+        Note:
+            Weak or absent interactions put :math:`\mu_\mathrm{TF}` below the
+            trap minimum, which makes the Thomas-Fermi profile identically
+            zero and its normalisation a field of NaNs. The seed then falls
+            back to a Gaussian, the exact non-interacting ground state of a
+            harmonic trap.
+
+        Args:
+            sim_params (dict): Simulation configuration. Only the interaction
+                strength ``"u"`` is read from here, and only as a fallback
+                behind ``system.simulation_parameters``; failing both, it is
+                derived from :class:`~src.library.parameters.CONSTANTS`.
+            system: System object with a ``simulation_parameters`` dict and the
+                external potential in ``system.uext.potential``, sampled on the
+                ``(n_r, n_phi, n_z)`` cylindrical grid.
+            file_name (str): Output path for the serialised ground state.
+            device (torch.device): Device on which the grid, the operators and
+                the descent are evaluated.
+            max_iterations (int, optional): Hard cap on descent iterations, so
+                that a state which never meets the tolerance cannot spin
+                forever (default ``200000``). On reaching it the current state
+                is written anyway, with a message.
+
+        Returns:
+            torch.Tensor: Normalised complex wavefunction of shape
+            ``(n_r, n_phi, n_z)``.
+
+        Raises:
+            FloatingPointError: If the energy or the residual stops being
+                finite, i.e. the descent has diverged. Without this check
+                every comparison against NaN would be false and the loop would
+                silently run to ``max_iterations``.
+            KeyError: If ``system.simulation_parameters`` is missing a grid
+                key.
         """
         params = system.simulation_parameters
         n_r, n_phi, n_z = params["Grid_resolution"]
@@ -314,29 +427,29 @@ class CylindricalGroundState:
 
     @staticmethod
     def read_ground_state(data, n_r: int, n_phi: int, n_z: int) -> torch.Tensor:
-        """
+        r"""
         Load a serialised cylindrical ground-state wavefunction from disk.
 
-        The file format is identical to the Cartesian :meth:`GroundState.read_ground_state`:
-        each row contains ``(real_part, imag_part)`` for one grid point, written
-        in row-major order over (n_r, n_phi, n_z).
+        The file format is identical to the Cartesian
+        :meth:`~src.library.ground_state.GroundState.read_ground_state`: each
+        row contains ``(real_part, imag_part)`` for one grid point, written in
+        row-major order over ``(n_r, n_phi, n_z)``.
 
-        Parameters
-        ----------
-        data : str or path-like
-            Text file produced by :func:`write_psi`.
-        n_r, n_phi, n_z : int
-            Grid point counts used to reshape the flat data.
+        Args:
+            data (str or os.PathLike): Text file produced by
+                :func:`~src.utils.read_write_utils.write_psi`.
+            n_r (int): Number of radial grid points.
+            n_phi (int): Number of azimuthal grid points.
+            n_z (int): Number of axial grid points.
 
-        Returns
-        -------
-        torch.Tensor
-            Complex tensor of shape ``(n_r, n_phi, n_z)`` on CPU.
+        Returns:
+            torch.Tensor: Complex tensor of shape ``(n_r, n_phi, n_z)``, on the
+            CPU. Move it to the simulation device before use.
 
-        Raises
-        ------
-        ValueError
-            If the file does not hold exactly ``n_r*n_phi*n_z`` points.
+        Raises:
+            ValueError: If the file does not hold exactly ``n_r*n_phi*n_z``
+                points, which normally means it was written for a different
+                grid resolution.
         """
         matrix = pd.read_csv(data, header=None, names=["real", "imag"])
         matrix["real"] = matrix["real"].str.strip(" (")

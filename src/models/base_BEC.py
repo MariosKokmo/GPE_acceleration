@@ -21,14 +21,22 @@ class BaseBEC:
     
     This class provides common functionality including:
     - Ground state initialization
+
+    
     - Time evolution using split-step Fourier method
+    
     - Parameter management
+    
     - Data output and logging
     
     To create a custom simulation:
+    
     1. Inherit from this class
+    
     2. Override _main_simulation_loop() to implement custom physics
+    
     3. Override _initialize_custom_parameters() for simulation-specific parameters
+    
     4. Override _write_custom_outputs() for additional output files
     """
     
