@@ -120,13 +120,35 @@ nitpicky = False
 
 html_theme = "furo"
 html_title = f"{project} {release}"
-html_static_path = ["_static"]
+html_static_path = ["_static"] if (HERE / "_static").is_dir() else []
 
-# The repository keeps figures in ``static/`` and the Markdown guides refer to
-# them with raw ``<img src="static/...">`` tags, which Sphinx passes through
-# untouched. Staging a copy under ``_extra`` puts them at the output root so
-# those paths resolve in the built site as well as on GitHub.
-html_extra_path = ["_extra"]
+
+def _stage_static_figures() -> list[str]:
+    """Stage ``static/`` for copying to the output root; return the extra path.
+
+    The repository keeps figures in ``static/`` and the Markdown guides point at
+    them with raw ``<img src="static/...">`` tags, which Sphinx passes through
+    untouched — so the files have to land at the root of the built site for
+    those paths to resolve there as well as on GitHub.
+
+    This runs while ``conf.py`` is being executed, *not* from a ``builder-inited``
+    hook. Sphinx validates ``html_extra_path`` on ``config-inited``, which fires
+    first, so a directory created from the later hook does not exist yet and the
+    build fails under ``-W`` on any fresh checkout — the staging directory is
+    gitignored, so CI never has one left over from a previous run.
+    """
+    import shutil
+
+    source = ROOT / "static"
+    if not source.is_dir():
+        return []
+    destination = HERE / "_extra" / "static"
+    destination.parent.mkdir(exist_ok=True)
+    shutil.copytree(source, destination, dirs_exist_ok=True)
+    return ["_extra"]
+
+
+html_extra_path = _stage_static_figures()
 
 
 # -- Generate the API tree from the source on every build --------------------
@@ -152,18 +174,6 @@ def run_apidoc(_app) -> None:
         # Entry points and scripts: no useful API surface.
         str(ROOT / "src" / "run.py"),
     ])
-
-
-def stage_static_figures(_app) -> None:
-    """Copy ``static/`` next to the built HTML so the guides' figures resolve."""
-    import shutil
-
-    source = ROOT / "static"
-    if not source.is_dir():
-        return
-    destination = HERE / "_extra" / "static"
-    destination.parent.mkdir(exist_ok=True)
-    shutil.copytree(source, destination, dirs_exist_ok=True)
 
 
 # Illustrative JSON in the guides is not valid JSON (it uses a typographic
@@ -199,5 +209,4 @@ def escape_modulus_bars(_app, _what, _name, _obj, _options, lines) -> None:
 
 def setup(app):
     app.connect("builder-inited", run_apidoc)
-    app.connect("builder-inited", stage_static_figures)
     app.connect("autodoc-process-docstring", escape_modulus_bars)
