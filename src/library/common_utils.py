@@ -1,7 +1,7 @@
 """
 Common utilities for the GPE solver, including functions for wavefunction evolution, phase manipulation, and
 
-other shared operations across different GPE variants (e.g., finite-temperature SGPE) and all teh coordinate systems.
+other shared operations across different GPE variants (e.g., finite-temperature SGPE) and all the coordinate systems.
 
 """
 import numpy as np

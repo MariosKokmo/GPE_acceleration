@@ -1,27 +1,56 @@
-"""GPE library in cylindrical coordinates (r, φ, z).
+r"""
+GPE solver library in cylindrical coordinates :math:`(r, \varphi, z)`.
+
+Cylindrical counterpart to :mod:`src.library.gpe_library`, in the same
+dimensionless units (:math:`\hbar = m = \omega_\mathrm{ho} = 1`). The split-step
+structure is unchanged; what differs is the kinetic operator, which is no
+longer diagonal in a single Fourier basis, and the volume element
+:math:`\mathrm{d}V = r\,\mathrm{d}r\,\mathrm{d}\varphi\,\mathrm{d}z` that every
+integral carries.
 
 Grid conventions
 ----------------
-r  : half-point grid r_i = (i + 1/2) dr  (i = 0 … n_r-1), avoids r = 0 singularity.
-φ  : uniform  0 … 2π  (n_phi points, DFT-ordered).
-z  : uniform  z_min … z_max  (n_z points, FFT-ordered).
 
-Kinetic operator
-----------------
-The radial Laplacian for azimuthal mode m is
+:math:`r`
+    Half-point grid :math:`r_i = (i + 1/2)\,\mathrm{d}r`,
+    :math:`i = 0 \ldots n_r - 1`. Keeping the points off :math:`r = 0` avoids
+    the coordinate singularity and imposes a Neumann condition
+    (:math:`\partial\psi/\partial r = 0`) at the axis for :math:`m = 0`.
+:math:`\varphi`
+    Uniform :math:`0 \ldots 2\pi` over ``n_phi`` points, in DFT order.
+:math:`z`
+    Uniform :math:`z_\mathrm{min} \ldots z_\mathrm{max}` over ``n_z`` points,
+    in FFT order.
 
-    L_r^m ψ = (1/r) d/dr(r dψ/dr) − m²/r² ψ
+The kinetic operator
+--------------------
 
-discretised with the conservative flux scheme on the half-point grid.  The
-resulting tridiagonal matrix is NOT symmetric in the ordinary sense, but IS
-self-adjoint in the weighted inner product ⟨f,g⟩ = ∫ f* g r dr.  The
-symmetrised matrix T̃_r^m = √r · T_r^m · (√r)^{-1} IS real-symmetric and can
-be diagonalised once via `torch.linalg.eigh`.
+The radial Laplacian for azimuthal mode :math:`m` is
 
-Call `build_radial_operators` at initialisation to obtain the eigendecomposition
-dicts; pass them to `p_evolution`, `split_step_step`, `sgpe_step`, etc.
+.. math::
 
-Dimensionless units: ħ = m = ω_ho = 1  (same as GPELibrary).
+    L_r^{m}\psi = \frac{1}{r}\frac{\partial}{\partial r}
+        \left(r \frac{\partial \psi}{\partial r}\right)
+        - \frac{m^2}{r^2}\psi ,
+
+discretised with a conservative flux scheme on the half-point grid. The
+resulting tridiagonal matrix is *not* symmetric in the ordinary sense, but it
+*is* self-adjoint in the weighted inner product
+:math:`\langle f, g \rangle = \int f^{*} g\, r\,\mathrm{d}r`. The
+:math:`\sqrt{r}` similarity transform
+
+.. math::
+
+    \tilde{T}_r^{m} = \sqrt{r}\; T_r^{m}\; \left(\sqrt{r}\right)^{-1}
+
+is real-symmetric, so it can be diagonalised once with
+:func:`torch.linalg.eigh` and reused for the whole run.
+
+Call :meth:`GPECylindricalLibrary.build_radial_operators` at initialisation to
+obtain the eigendecomposition dicts, then pass them to
+:meth:`~GPECylindricalLibrary.p_evolution`,
+:meth:`~GPECylindricalLibrary.split_step_step`,
+:meth:`~GPECylindricalLibrary.sgpe_step` and the rest.
 """
 
 import warnings
@@ -30,26 +59,26 @@ import torch
 from .common_utils import CommonUtils as cu
 
 class GPECylindricalLibrary():
-    """
-    Cylindrical-coordinate GPE library.
+    r"""
+    Core of the cylindrical-coordinate GPE solver.
 
-    Reuses shared, coordinate-agnostic helpers from CommonUtils:
-        x_evolution, extract_phase, add_phase, update_phase.
+    Reuses the coordinate-agnostic helpers from
+    :class:`~src.library.common_utils.CommonUtils` (``x_evolution``,
+    ``extract_phase``, ``add_phase``, ``update_phase``) and adds the operators
+    that the geometry changes: :meth:`init_grid`,
+    :meth:`build_radial_operators`, :meth:`normalize`, :meth:`p_evolution`,
+    :meth:`split_step_step`, :meth:`mod_grad_psi`,
+    :meth:`calculate_energy_allocation`, :meth:`calculate_chemical_potential`,
+    :meth:`generate_thermal_noise` and :meth:`sgpe_step`. The one diagnostic
+    defined here is :meth:`angular_momentum_z`.
 
-    Core operators for cylindrical geometry:
-        init_grid, build_radial_operators, normalize, p_evolution,
-        split_step_step, mod_grad_psi, calculate_energy_allocation,
-        calculate_chemical_potential, generate_thermal_noise, sgpe_step.
-
-    Diagnostics defined here:
-        angular_momentum_z.
-
-    The remaining diagnostics (rms_radius, column_density_z,
-    column_density_radial, radial_density_profile) and vortex imprinting
-    (create_vortices, check_vortex_resolution) live in the subclass
-    :class:`GPE2DCylindricalLibrary`, mirroring the Cartesian split between
-    ``GPELibrary`` and ``GPE2DLibrary``. Because that subclass inherits from
-    this one, it exposes everything in both.
+    The remaining diagnostics (``rms_radius``, ``column_density_z``,
+    ``column_density_radial``, ``radial_density_profile``) and the vortex
+    imprinting (``create_vortices``, ``check_vortex_resolution``) live in the
+    subclass :class:`GPE2DCylindricalLibrary`, mirroring the Cartesian split
+    between :class:`~src.library.gpe_library.GPELibrary` and
+    :class:`~src.library.gpe_library.GPE2DLibrary`. Because that subclass
+    inherits from this one, it exposes everything in both.
     """
 
     #: Reserved key under which build_radial_operators caches the per-φ stacked
@@ -67,11 +96,22 @@ class GPECylindricalLibrary():
         step: float,
         device: torch.device,
     ) -> torch.Tensor:
-        """
-        Spectral index axis in FFT (wrapped) order, built directly on ``device``.
+        r"""
+        Build a spectral index axis in FFT (wrapped) order.
 
-        Indices 0 … n/2-1 hold the positive values and n/2 … n-1 the negative
-        ones, matching the layout of :func:`torch.fft.fft`.
+        Indices :math:`0 \ldots n/2 - 1` hold the positive values and
+        :math:`n/2 \ldots n-1` the negative ones, matching the layout of
+        :func:`torch.fft.fft`, so the axis can multiply a transformed field
+        directly.
+
+        Args:
+            n (int): Number of grid points.
+            step (float): Spacing between successive spectral values; ``1.0``
+                gives the bare integer mode indices.
+            device (torch.device): Device the axis is allocated on.
+
+        Returns:
+            torch.Tensor: The axis, of shape ``(n,)`` and dtype ``float64``.
         """
         k = torch.arange(n, dtype=torch.float64, device=device)
         k[n // 2:] -= n
@@ -87,25 +127,29 @@ class GPECylindricalLibrary():
         n_z: int,
         device: torch.device,
     ) -> tuple:
-        """
-        Initialise a cylindrical (r, φ, z) grid.
+        r"""
+        Initialise a cylindrical :math:`(r, \varphi, z)` grid.
 
-        r uses a half-point layout so that the innermost point is at dr/2,
-        avoiding the coordinate singularity at r = 0 and naturally imposing
-        a Neumann condition (dψ/dr = 0) for m = 0 at the axis.
+        The radial direction uses a half-point layout, so the innermost point
+        sits at :math:`\mathrm{d}r/2`. That avoids the coordinate singularity
+        at :math:`r = 0` and naturally imposes a Neumann condition
+        (:math:`\partial\psi/\partial r = 0`) at the axis for :math:`m = 0`.
 
         Args:
-            r_max  : outer radial boundary.
-            z_min, z_max : axial extent.
-            n_r, n_phi, n_z : grid point counts.
-            device : torch device.
+            r_max (float): Outer radial boundary.
+            z_min (float): Lower axial bound.
+            z_max (float): Upper axial bound.
+            n_r (int): Number of radial grid points.
+            n_phi (int): Number of azimuthal grid points.
+            n_z (int): Number of axial grid points.
+            device (torch.device): Device the tensors are allocated on.
 
         Returns:
-            r, phi, z       – 1-D coordinate arrays.
-            kz              – z-momentum array (FFT order).
-            m_modes         – azimuthal mode indices (DFT order, integer values).
-            dr, dphi, dz    – grid spacings.
-            space_grid      – (gr, gphi, gz) 3-D meshgrids of shape (n_r, n_phi, n_z).
+            tuple: ``(r, phi, z, kz, m_modes, dr, dphi, dz, space_grid)`` —
+            the three 1-D coordinate axes, the axial momentum axis in FFT
+            order, the azimuthal mode indices in DFT order, the three grid
+            spacings, and the meshgrids ``(gr, gphi, gz)`` of shape
+            ``(n_r, n_phi, n_z)``.
         """
         dr = r_max / n_r
         r = (torch.arange(n_r, dtype=torch.float64, device=device) + 0.5) * dr
@@ -136,34 +180,51 @@ class GPECylindricalLibrary():
         m_modes: torch.Tensor,
         device: torch.device,
     ) -> tuple:
-        """
-        Build and diagonalise the radial kinetic operator T_r^m for every
-        unique |m| appearing in m_modes.
+        r"""
+        Build and diagonalise the radial kinetic operator for every azimuthal
+        mode.
 
-        The conservative discretisation of (1/r)(d/dr)(r d/dr) − m²/r² on the
-        half-point grid gives a tridiagonal matrix.  It is symmetrised by the
-        √r similarity transform so that torch.linalg.eigh can be used.
+        One operator is built per unique :math:`\lvert m \rvert` appearing in
+        ``m_modes``. The conservative discretisation of
+        :math:`(1/r)\,\partial_r(r\,\partial_r) - m^2/r^2` on the half-point
+        grid gives a tridiagonal matrix, which is symmetrised by the
+        :math:`\sqrt{r}` similarity transform so that
+        :func:`torch.linalg.eigh` can be used,
 
-        T̃_r^m = diag(√r) · T_r^m · diag(1/√r)
+        .. math::
 
-        The radial propagator for mode m over time step Δτ is then
+            \tilde{T}_r^{m} =
+                \mathrm{diag}\!\left(\sqrt{r}\right) T_r^{m}\,
+                \mathrm{diag}\!\left(1/\sqrt{r}\right)
+                = V \Lambda V^{\mathsf{T}} .
 
-            exp(−i Δτ T_r^m) ψ = (1/√r) · V · exp(−i Δτ Λ) · V^T · (√r ψ)
+        The radial propagator for mode :math:`m` over a step
+        :math:`\Delta\tau` then costs two matmuls instead of a matrix
+        exponential,
 
-        where V, Λ come from T̃_r^m = V Λ V^T.
+        .. math::
+
+            e^{-i \Delta\tau\, T_r^{m}}\psi =
+                \frac{1}{\sqrt{r}}\, V\, e^{-i \Delta\tau \Lambda}\,
+                V^{\mathsf{T}} \left(\sqrt{r}\,\psi\right).
+
+        Doing this once at initialisation is what makes the cylindrical solver
+        competitive with the Cartesian one, where the kinetic step is a plain
+        FFT.
 
         Args:
-            r       : 1-D radial grid (half-point, length n_r).
-            dr      : radial spacing.
-            m_modes : azimuthal mode indices (DFT order).
-            device  : computation device.
+            r (torch.Tensor): Radial grid (half-point), of shape ``(n_r,)``.
+            dr (float): Radial grid spacing.
+            m_modes (torch.Tensor): Azimuthal mode indices in DFT order.
+            device (torch.device): Computation device the operators end up on.
 
         Returns:
-            tuple: ``(eigvecs_dict, eigvals_dict)``. Each maps ``|m|`` to a
-            tensor — eigenvectors of shape (n_r, n_r) and eigenvalues of
-            shape (n_r,). ``eigvecs_dict`` additionally carries the reserved
-            key ``_STACK_KEY``, holding ``(V_all, lam_all)``: the same
-            operators re-indexed by φ mode, so the whole azimuthal axis can
+            tuple[dict, dict]: ``(eigvecs_dict, eigvals_dict)``. Each maps the
+            absolute azimuthal index to a tensor — eigenvectors of shape
+            ``(n_r, n_r)`` and eigenvalues of shape ``(n_r,)``.
+            ``eigvecs_dict`` additionally carries the reserved key
+            ``_STACK_KEY``, holding ``(V_all, lam_all)``: the same operators
+            re-indexed by :math:`\varphi` mode, so the whole azimuthal axis can
             be propagated with one batched matmul instead of a Python loop.
         """
         n_r = len(r)
@@ -212,28 +273,31 @@ class GPECylindricalLibrary():
         eigvals_dict: dict,
         m_modes: torch.Tensor,
     ) -> tuple:
-        """
-        Re-index the per-|m| eigendecomposition by azimuthal grid position.
+        r"""
+        Re-index the per-mode eigendecomposition by azimuthal grid position.
 
-        ``p_evolution`` and the ground-state kinetic operator need, for every φ
-        index, the eigenbasis of its own |m|. Looking those up one at a time
-        costs a Python iteration and a host synchronisation per φ *per time
+        :meth:`p_evolution` and the ground-state kinetic operator need, for
+        every :math:`\varphi` index, the eigenbasis of its own
+        :math:`\lvert m \rvert`. Looking those up one at a time costs a Python
+        iteration and a host synchronisation per :math:`\varphi` *per time
         step*; stacking them once lets the whole azimuthal axis go through a
         single batched matmul.
 
-        Only ``V_all`` is materialised — the projection uses ``V_allᵀ`` as a
-        transposed view, which benchmarks within a few percent of a contiguous
-        copy while halving the memory.
-
-        The result is cached inside ``eigvecs_dict`` (under ``_STACK_KEY``), so
-        it lives and dies with the operators it belongs to.
+        Only ``V_all`` is materialised — the projection uses its transpose as a
+        view, which benchmarks within a few percent of a contiguous copy while
+        halving the memory. The result is cached inside ``eigvecs_dict`` under
+        ``_STACK_KEY``, so it lives and dies with the operators it belongs to.
 
         Args:
-            eigvecs_dict, eigvals_dict : from :meth:`build_radial_operators`.
-            m_modes : azimuthal mode indices (n_phi,), DFT order.
+            eigvecs_dict (dict): Eigenvectors from
+                :meth:`build_radial_operators`.
+            eigvals_dict (dict): Matching eigenvalues.
+            m_modes (torch.Tensor): Azimuthal mode indices in DFT order, of
+                shape ``(n_phi,)``.
 
         Returns:
-            (V_all, lam_all) of shapes (n_phi, n_r, n_r) and (n_phi, n_r).
+            tuple[torch.Tensor, torch.Tensor]: ``(V_all, lam_all)``, of shapes
+            ``(n_phi, n_r, n_r)`` and ``(n_phi, n_r)``.
         """
         key = GPECylindricalLibrary._STACK_KEY
         cached = eigvecs_dict.get(key)
@@ -254,25 +318,40 @@ class GPECylindricalLibrary():
         V_all: torch.Tensor,
         sqrt_r: torch.Tensor,
     ) -> torch.Tensor:
-        """
-        Apply ``(1/√r) · V · diag(factors) · Vᵀ · (√r ·)`` to every φ mode at once.
+        r"""
+        Apply the radial eigenbasis operator to every azimuthal mode at once.
 
-        This is the √r-symmetrised radial operator of the module docstring,
-        evaluated in the precomputed eigenbasis. ``V_all`` is real, so the
-        complex field is pushed through the two matmuls as an interleaved
-        real view: a real GEMM does half the work of the equivalent complex
-        one, and the result is bit-identical.
+        Evaluates
+
+        .. math::
+
+            \frac{1}{\sqrt{r}}\; V \,\mathrm{diag}(\text{factors})\,
+                V^{\mathsf{T}} \left(\sqrt{r}\;\cdot\right),
+
+        the :math:`\sqrt{r}`-symmetrised radial operator of the module
+        docstring, in the precomputed eigenbasis.
+
+        Note:
+            ``V_all`` is real, so the complex field is pushed through the two
+            matmuls as an interleaved real view: a real GEMM does half the work
+            of the equivalent complex one, and the result is bit-identical.
 
         Args:
-            psi_m   : (n_r, n_phi, n_z) complex field, already DFT'd over φ.
-            factors : diagonal multiplier per radial eigenmode, broadcastable
-                to (n_phi, n_r, n_z). ``exp(−damping·Δτ·Λ)`` for a propagator,
-                ``Λ`` itself to apply the operator, a 0/1 mask to project.
-            V_all   : (n_phi, n_r, n_r) stacked eigenvectors.
-            sqrt_r  : √r on the radial grid (n_r,).
+            psi_m (torch.Tensor): Complex field of shape
+                ``(n_r, n_phi, n_z)``, already transformed over
+                :math:`\varphi`.
+            factors (torch.Tensor): Diagonal multiplier per radial eigenmode,
+                broadcastable to ``(n_phi, n_r, n_z)``. Pass
+                :math:`e^{-\text{damping}\,\Delta\tau\,\Lambda}` for a
+                propagator, :math:`\Lambda` itself to apply the operator, or a
+                0/1 mask to project.
+            V_all (torch.Tensor): Stacked eigenvectors of shape
+                ``(n_phi, n_r, n_r)``.
+            sqrt_r (torch.Tensor): :math:`\sqrt{r}` on the radial grid, of
+                shape ``(n_r,)``.
 
         Returns:
-            Tensor of shape (n_r, n_phi, n_z).
+            torch.Tensor: The result, of shape ``(n_r, n_phi, n_z)``.
         """
         n_r, n_phi, n_z = psi_m.shape
         radial = sqrt_r.reshape(-1, 1, 1)
@@ -300,16 +379,23 @@ class GPECylindricalLibrary():
         dphi: float,
         dz: float,
     ) -> torch.Tensor:
-        """
-        Normalise ψ so that ∫|ψ|² r dr dφ dz = 1.
+        r"""
+        Normalise the wavefunction with the cylindrical volume element.
+
+        .. math::
+
+            \int \lvert \psi \rvert^{2}\,
+                r\,\mathrm{d}r\,\mathrm{d}\varphi\,\mathrm{d}z = 1
 
         Args:
-            psi           : wavefunction of shape (n_r, n_phi, n_z).
-            r             : 1-D radial grid (n_r,).
-            dr, dphi, dz  : grid spacings.
+            psi (torch.Tensor): Wavefunction of shape ``(n_r, n_phi, n_z)``.
+            r (torch.Tensor): Radial grid, of shape ``(n_r,)``.
+            dr (float): Radial grid spacing.
+            dphi (float): Azimuthal grid spacing.
+            dz (float): Axial grid spacing.
 
         Returns:
-            Normalised wavefunction.
+            torch.Tensor: The normalised wavefunction.
         """
         r_w = r.reshape(-1, 1, 1)
         norm_sq = torch.sum(torch.abs(psi) ** 2 * r_w) * (dr * dphi * dz)
@@ -330,33 +416,51 @@ class GPECylindricalLibrary():
         eigvals_dict: dict,
         damping: complex = 1j,
     ) -> torch.Tensor:
-        """
-        Full kinetic evolution exp(−damping · Δτ · T_kin) in cylindrical coordinates.
+        r"""
+        Apply the full kinetic evolution
+        :math:`e^{-\text{damping}\,\Delta\tau\,T}` in cylindrical coordinates.
 
-        Sequence:
-            1. DFT over φ  →  azimuthal modes m.
-            2. FFT over z  →  axial modes kz.
-            3. Apply z kinetic: exp(−damping · Δτ · kz²/2)  [diagonal].
-            4. For each m, apply radial kinetic via precomputed eigenbasis.
-            5. Inverse FFT over z, inverse DFT over φ.
+        The sequence is:
 
-        The radial propagator uses the √r symmetrisation:
-            exp(−damping · Δτ · T_r^m) ψ = (1/√r) V exp(−damping·Δτ·Λ) V^T (√r ψ)
+        1. DFT over :math:`\varphi` — to azimuthal modes :math:`m`;
+        2. FFT over :math:`z` — to axial modes :math:`k_z`;
+        3. the axial kinetic step
+           :math:`e^{-\text{damping}\,\Delta\tau\,k_z^2/2}`, which is diagonal;
+        4. the radial kinetic step for every :math:`m`, through the precomputed
+           eigenbasis;
+        5. the inverse transforms over :math:`z` and :math:`\varphi`.
 
-        ``damping`` is 1j for ordinary GPE, (1j + γ) for SGPE.
+        The radial propagator uses the :math:`\sqrt{r}` symmetrisation,
+
+        .. math::
+
+            e^{-\text{damping}\,\Delta\tau\, T_r^{m}}\psi =
+                \frac{1}{\sqrt{r}}\, V\,
+                e^{-\text{damping}\,\Delta\tau\,\Lambda}\,
+                V^{\mathsf{T}} \left(\sqrt{r}\,\psi\right).
+
+        Note:
+            :math:`T_r` and :math:`T_z` act on different coordinates and
+            therefore commute, so applying them one after the other is exact
+            rather than a further splitting error.
 
         Args:
-            psi            : (n_r, n_phi, n_z) complex wavefunction.
-            dtau           : time step.
-            kz             : z-momentum grid (n_z,).
-            m_modes        : azimuthal mode indices (n_phi,).
-            r              : radial grid (n_r,).
-            eigvecs_dict   : {|m|: (n_r, n_r)} from build_radial_operators.
-            eigvals_dict   : {|m|: (n_r,)}   from build_radial_operators.
-            damping        : complex prefactor (1j for GPE, 1j+γ for SGPE).
+            psi (torch.Tensor): Complex wavefunction of shape
+                ``(n_r, n_phi, n_z)``.
+            dtau (float): Time step :math:`\Delta\tau`.
+            kz (torch.Tensor): Axial momentum grid, of shape ``(n_z,)``.
+            m_modes (torch.Tensor): Azimuthal mode indices, of shape
+                ``(n_phi,)``.
+            r (torch.Tensor): Radial grid, of shape ``(n_r,)``.
+            eigvecs_dict (dict): Eigenvectors from
+                :meth:`build_radial_operators`.
+            eigvals_dict (dict): Matching eigenvalues.
+            damping (complex, optional): Prefactor — ``1j`` for the ordinary
+                GPE, :math:`i + \gamma` for the SGPE (default ``1j``).
 
         Returns:
-            Updated wavefunction of shape (n_r, n_phi, n_z).
+            torch.Tensor: Updated wavefunction of shape
+            ``(n_r, n_phi, n_z)``.
         """
         n_r, n_phi, n_z = psi.shape
 
@@ -405,20 +509,42 @@ class GPECylindricalLibrary():
         dz: float,
         renormalise: bool = False,
     ) -> torch.Tensor:
-        """
-        Strang split-step: x-half, p-full, x-half.
+        r"""
+        Advance the wavefunction by one split-step iteration.
 
-        For a real ``utot`` every factor applied here has unit modulus, so the
-        norm is conserved to machine precision and no renormalisation is needed.
-        When ``utot`` carries an imaginary part (three-body losses, complex
-        absorbing potential) the norm is *meant* to decay: renormalising would
-        silently cancel the atom loss, which is why ``renormalise`` defaults to
-        ``False``. Matches :meth:`GPELibrary.split_step_step`.
+        A Strang splitting — real-space half-step, full kinetic step,
+        real-space half-step — matching
+        :meth:`~src.library.gpe_library.GPELibrary.split_step_step`, with
+        :meth:`p_evolution` supplying the cylindrical kinetic step.
 
-        Args match those of p_evolution / x_evolution / normalize.
+        Note:
+            For a real ``utot`` every factor applied here has unit modulus, so
+            the norm is conserved to machine precision and no renormalisation
+            is needed. When ``utot`` carries an imaginary part (three-body
+            losses, a complex absorbing potential) the norm is *meant* to
+            decay: renormalising would silently cancel the atom loss, which is
+            why ``renormalise`` defaults to ``False``.
+
+        Args:
+            psi (torch.Tensor): Wavefunction of shape ``(n_r, n_phi, n_z)``.
+            utot (torch.Tensor): Total real-space operator, frozen for the
+                duration of the step.
+            dtau (float): Time step :math:`\Delta\tau`.
+            kz (torch.Tensor): Axial momentum grid.
+            m_modes (torch.Tensor): Azimuthal mode indices.
+            r (torch.Tensor): Radial grid.
+            eigvecs_dict (dict): Eigenvectors from
+                :meth:`build_radial_operators`.
+            eigvals_dict (dict): Matching eigenvalues.
+            dr (float): Radial grid spacing.
+            dphi (float): Azimuthal grid spacing.
+            dz (float): Axial grid spacing.
+            renormalise (bool, optional): Force unit norm after the step. Only
+                meaningful for a deliberately number-conserving run with a
+                lossy potential (default ``False``).
 
         Returns:
-            Wavefunction after one split-step.
+            torch.Tensor: The wavefunction after one split-step.
         """
         psi = cu.x_evolution(psi, utot, dtau, factor=0.5)
         psi = GPECylindricalLibrary.p_evolution(
@@ -441,24 +567,41 @@ class GPECylindricalLibrary():
         kz: torch.Tensor,
         m_modes: torch.Tensor,
     ) -> torch.Tensor:
-        """
-        Compute |∇ψ| in cylindrical coordinates.
+        r"""
+        Compute :math:`\lvert \nabla \psi \rvert` in cylindrical coordinates.
 
-        |∇ψ|² = |∂ψ/∂r|² + (1/r²)|∂ψ/∂φ|² + |∂ψ/∂z|²
+        .. math::
 
-        ::
+            \lvert \nabla \psi \rvert^{2} =
+                \left\lvert \frac{\partial \psi}{\partial r} \right\rvert^{2}
+                + \frac{1}{r^2}
+                  \left\lvert \frac{\partial \psi}{\partial \varphi}
+                  \right\rvert^{2}
+                + \left\lvert \frac{\partial \psi}{\partial z} \right\rvert^{2}
 
-            r-derivative : central finite differences, second-order one-sided
-                           at the two radial boundaries (the grid is not
-                           periodic in r, so no spectral derivative there).
-            φ-derivative : spectral via DFT  →  ∂ψ/∂φ = IDFT(im ψ̃_m).
-            z-derivative : spectral via FFT  →  ∂ψ/∂z = IFFT(ikz ψ̃_kz).
+        The two periodic directions are differentiated spectrally —
+        :math:`\partial_\varphi \psi = \mathrm{IDFT}(i m \tilde\psi_m)` and
+        :math:`\partial_z \psi = \mathrm{IFFT}(i k_z \tilde\psi_{k_z})` —
+        while the radial derivative uses central finite differences, with
+        second-order one-sided stencils at the two radial boundaries, since the
+        grid is not periodic in :math:`r`.
 
-        The radial term is the only non-spectral piece in the library, so it
-        sets the accuracy of the kinetic energy at O(dr²).
+        Note:
+            The radial term is the only non-spectral piece in the library, so
+            it is what sets the accuracy of the kinetic energy, at
+            :math:`O(\mathrm{d}r^2)`. A first-order end point would dominate
+            the error, which is why the boundary stencils are second-order too.
+
+        Args:
+            psi (torch.Tensor): Wavefunction of shape ``(n_r, n_phi, n_z)``.
+            r (torch.Tensor): Radial grid, of shape ``(n_r,)``.
+            dr (float): Radial grid spacing.
+            kz (torch.Tensor): Axial momentum grid.
+            m_modes (torch.Tensor): Azimuthal mode indices.
 
         Returns:
-            Real-valued tensor of shape (n_r, n_phi, n_z).
+            torch.Tensor: Real-valued tensor of shape
+            ``(n_r, n_phi, n_z)``.
         """
         n_r, n_phi, n_z = psi.shape
         r_w = r.reshape(-1, 1, 1)
@@ -506,25 +649,42 @@ class GPECylindricalLibrary():
         m_modes: torch.Tensor,
         **parameters,
     ) -> dict:
-        """
-        Energy components with cylindrical volume element r dr dφ dz.
+        r"""
+        Split the condensate energy into its kinetic, potential and interaction
+        parts, with the cylindrical volume element.
+
+        .. math::
+
+            e_\mathrm{kin} = \frac{1}{2}\int \lvert \nabla\psi \rvert^{2}\,
+                r\,\mathrm{d}r\,\mathrm{d}\varphi\,\mathrm{d}z,
+
+        .. math::
+
+            e_\mathrm{pot} = \int V_\mathrm{ext}\lvert \psi \rvert^{2}\,
+                r\,\mathrm{d}r\,\mathrm{d}\varphi\,\mathrm{d}z,
+            \qquad
+            e_\mathrm{int} = \frac{u}{2}\int \lvert \psi \rvert^{4}\,
+                r\,\mathrm{d}r\,\mathrm{d}\varphi\,\mathrm{d}z
 
         Args:
-            psi, Vext : wavefunction and external potential (n_r, n_phi, n_z).
-                If Vext is complex (e.g. an absorbing potential), only the real
-                part contributes — the imaginary part is a loss rate, not an
-                energy.
-            r         : radial grid.
-            dr, dphi, dz : spacings.
-            kz        : z-momentum grid.
-            m_modes   : azimuthal mode indices.
-            **parameters : must include 'u' (interaction strength).
+            psi (torch.Tensor): Wavefunction of shape ``(n_r, n_phi, n_z)``.
+            Vext (torch.Tensor): External potential on the same grid. If it is
+                complex — an absorbing potential, say — only the real part
+                contributes; the imaginary part is a loss rate, not an energy.
+            r (torch.Tensor): Radial grid.
+            dr (float): Radial grid spacing.
+            dphi (float): Azimuthal grid spacing.
+            dz (float): Axial grid spacing.
+            kz (torch.Tensor): Axial momentum grid.
+            m_modes (torch.Tensor): Azimuthal mode indices.
+            **parameters: Must include the interaction strength ``"u"``.
 
         Returns:
-            dict with keys 'e_kin', 'e_pot', 'e_int', 'E_total'.
+            dict: The keys ``'e_kin'``, ``'e_pot'``, ``'e_int'`` and
+            ``'E_total'``, in units of :math:`\hbar\omega_\mathrm{ho}`.
 
         Raises:
-            ValueError: If 'u' is not supplied.
+            ValueError: If ``"u"`` is not supplied.
         """
         if "u" not in parameters:
             raise ValueError("calculate_energy_allocation requires the interaction strength 'u'")
@@ -557,10 +717,34 @@ class GPECylindricalLibrary():
         kz: torch.Tensor,
         m_modes: torch.Tensor,
     ) -> float:
-        """
-        Mean-field chemical potential μ = e_kin + e_pot + 2 e_int.
+        r"""
+        Compute the mean-field chemical potential.
 
-        Identical formula to GPELibrary but uses cylindrical energy calculation.
+        .. math::
+
+            \mu = e_\mathrm{kin} + e_\mathrm{pot} + 2\,e_\mathrm{int}
+
+        Identical in form to
+        :meth:`~src.library.gpe_library.GPELibrary.calculate_chemical_potential`
+        — see there for why the interaction term is counted twice — but the
+        energies come from the cylindrical
+        :meth:`calculate_energy_allocation`.
+
+        Args:
+            psi (torch.Tensor): Normalised wavefunction of shape
+                ``(n_r, n_phi, n_z)``.
+            uext (torch.Tensor): External trapping potential on the grid.
+            u (float): Dimensionless interaction strength :math:`u`.
+            r (torch.Tensor): Radial grid.
+            dr (float): Radial grid spacing.
+            dphi (float): Azimuthal grid spacing.
+            dz (float): Axial grid spacing.
+            kz (torch.Tensor): Axial momentum grid.
+            m_modes (torch.Tensor): Azimuthal mode indices.
+
+        Returns:
+            float: The chemical potential :math:`\mu`, in units of
+            :math:`\hbar\omega_\mathrm{ho}`.
         """
         energy = GPECylindricalLibrary.calculate_energy_allocation(
             psi, uext, r, dr, dphi, dz, kz, m_modes, u=u
@@ -588,42 +772,67 @@ class GPECylindricalLibrary():
         eigvals_dict: dict = None,
         e_cut: float = None,
     ) -> torch.Tensor:
-        """
-        Complex Gaussian noise for one SGPE time step in cylindrical geometry.
+        r"""
+        Generate a complex Gaussian noise field for one SGPE time step in
+        cylindrical geometry.
 
-        The local cell volume is dV(r_i) = r_i dr dφ dz, so the noise amplitude
-        scales with 1/√dV to satisfy the fluctuation-dissipation theorem:
+        The local cell volume varies with radius,
+        :math:`\mathrm{d}V(r_i) = r_i\,\mathrm{d}r\,\mathrm{d}\varphi\,
+        \mathrm{d}z`, so the noise amplitude scales as
+        :math:`1/\sqrt{\mathrm{d}V}` to satisfy the fluctuation-dissipation
+        theorem,
 
-            amplitude_i = √(γ kT Δτ / (r_i dr dφ dz))
+        .. math::
 
-        Projection (the "P" of the *projected* SGPE)
-        --------------------------------------------
-        Delta-correlated noise is white across the whole grid, so it feeds
-        energy into every mode the grid can represent. The c-field description
-        is only valid below a cutoff energy, above which the modes belong to
-        the thermal cloud rather than the classical field. Supply the kinetic
-        operators together with ``e_cut`` to keep only the modes with
+            \text{amplitude}_i = \sqrt{\frac{\gamma\, k_B T\, \Delta\tau}
+                {r_i\,\mathrm{d}r\,\mathrm{d}\varphi\,\mathrm{d}z}} .
 
-            Λ_j^{|m|} + kz²/2  ≤  e_cut
+        Note:
+            **Projection — the "P" of the** *projected* **SGPE.**
+            Delta-correlated noise is white across the whole grid, so it feeds
+            energy into every mode the grid can represent. The c-field
+            description is only valid below a cutoff energy, above which the
+            modes belong to the thermal cloud rather than to the classical
+            field. Supply the kinetic operators together with ``e_cut`` to keep
+            only the modes with
 
-        where Λ is the radial kinetic eigenvalue — the exact cylindrical
-        analogue of the Cartesian ``p²/2 ≤ e_cut``. Without it the noise is
-        unprojected and the run will heat artificially at short wavelengths.
+            .. math::
+
+                \Lambda_j^{\lvert m \rvert} + \frac{k_z^2}{2}
+                    \le e_\mathrm{cut},
+
+            where :math:`\Lambda` is the radial kinetic eigenvalue — the exact
+            cylindrical analogue of the Cartesian
+            :math:`p^2/2 \le e_\mathrm{cut}`. Without it the noise is
+            unprojected and the run will heat artificially at short
+            wavelengths.
 
         Args:
-            shape         : (n_r, n_phi, n_z).
-            gamma, kT     : damping and temperature.
-            dtau          : time step.
-            r             : radial grid (n_r,).
-            dr, dphi, dz  : spacings.
-            device        : computation device.
-            kz, m_modes, eigvecs_dict, eigvals_dict : kinetic operators, all
-                required for projection (from init_grid / build_radial_operators).
-            e_cut         : cutoff energy in units of ħ·ω_ho. Projection is
-                applied only when it and the operators above are all supplied.
+            shape (tuple): Grid shape ``(n_r, n_phi, n_z)``.
+            gamma (float): Dimensionless damping coefficient :math:`\gamma`.
+            kT (float): Dimensionless temperature
+                :math:`k_B T / (\hbar\omega_\mathrm{ho})`.
+            dtau (float): Time step :math:`\Delta\tau`.
+            r (torch.Tensor): Radial grid, of shape ``(n_r,)``.
+            dr (float): Radial grid spacing.
+            dphi (float): Azimuthal grid spacing.
+            dz (float): Axial grid spacing.
+            device (torch.device): Computation device.
+            kz (torch.Tensor, optional): Axial momentum grid; required for the
+                projection.
+            m_modes (torch.Tensor, optional): Azimuthal mode indices; required
+                for the projection.
+            eigvecs_dict (dict, optional): Eigenvectors from
+                :meth:`build_radial_operators`; required for the projection.
+            eigvals_dict (dict, optional): Matching eigenvalues; required for
+                the projection.
+            e_cut (float, optional): Cutoff energy in units of
+                :math:`\hbar\omega_\mathrm{ho}`. The projection is applied only
+                when it and all four operators above are supplied.
 
         Returns:
-            Complex noise tensor of shape (n_r, n_phi, n_z).
+            torch.Tensor: Complex noise tensor of shape
+            ``(n_r, n_phi, n_z)``.
         """
         n_r, n_phi, n_z = shape
         r_w = r.reshape(-1, 1, 1).expand(n_r, n_phi, n_z)
@@ -670,37 +879,50 @@ class GPECylindricalLibrary():
         dz: float,
         renormalise: bool = False,
     ) -> torch.Tensor:
-        """
-        Deterministic SGPE split-step with (1 − iγ) dissipative damping.
+        r"""
+        Perform one deterministic SGPE split-step with
+        :math:`(1 - i\gamma)` dissipative damping.
 
-        The SGPE replaces GPE's unitary operator with:
+        The SGPE replaces the unitary GPE operator with
 
-            exp(−(i + γ) Δτ (H_mf − μ))
+        .. math::
 
-        Strang splitting:
-            1. Real-space half-step  exp(−(i+γ) Δτ/2 (V_eff − μ))
-            2. Kinetic full-step     (cylindrical p_evolution with damping i+γ)
-            3. Real-space half-step
+            e^{-(i + \gamma)\,\Delta\tau\,(H_\mathrm{mf} - \mu)},
 
-        The norm is left free so that μ actually drives the dynamics; see
-        :meth:`GPELibrary.sgpe_step` for the full argument.
+        applied as the same Strang splitting used everywhere else: a real-space
+        half-step
+        :math:`e^{-(i+\gamma)\Delta\tau (V_\mathrm{eff} - \mu)/2}`, a full
+        kinetic step through :meth:`p_evolution` with the damped prefactor, and
+        a second real-space half-step.
+
+        Note:
+            The norm is left free so that :math:`\mu` actually drives the
+            dynamics; see
+            :meth:`~src.library.gpe_library.GPELibrary.sgpe_step` for the full
+            argument.
 
         Args:
-            psi             : (n_r, n_phi, n_z) wavefunction.
-            utot            : total potential V_ext + u|ψ|² (frozen at step start).
-            mu              : chemical potential (reservoir).
-            gamma           : damping coefficient.
-            dtau            : time step.
-            kz              : z-momentum grid.
-            m_modes         : azimuthal mode indices.
-            r               : radial grid.
-            eigvecs_dict, eigvals_dict : from build_radial_operators.
-            dr, dphi, dz    : spacings.
-            renormalise     : force ∫|ψ|² dV = 1 after the step, which disables
-                              the reservoir coupling. Default False.
+            psi (torch.Tensor): Wavefunction of shape ``(n_r, n_phi, n_z)``.
+            utot (torch.Tensor): Total potential
+                :math:`V_\mathrm{ext} + u\lvert\psi\rvert^2`, frozen at the
+                start of the step.
+            mu (float): Reservoir chemical potential :math:`\mu`.
+            gamma (float): Damping coefficient :math:`\gamma`.
+            dtau (float): Time step :math:`\Delta\tau`.
+            kz (torch.Tensor): Axial momentum grid.
+            m_modes (torch.Tensor): Azimuthal mode indices.
+            r (torch.Tensor): Radial grid.
+            eigvecs_dict (dict): Eigenvectors from
+                :meth:`build_radial_operators`.
+            eigvals_dict (dict): Matching eigenvalues.
+            dr (float): Radial grid spacing.
+            dphi (float): Azimuthal grid spacing.
+            dz (float): Axial grid spacing.
+            renormalise (bool, optional): Force unit norm after the step, which
+                disables the reservoir coupling (default ``False``).
 
         Returns:
-            Updated wavefunction.
+            torch.Tensor: Updated wavefunction.
         """
         damping = 1j + gamma
         eff_pot = utot - mu
@@ -728,23 +950,37 @@ class GPECylindricalLibrary():
         dphi: float,
         dz: float,
     ) -> torch.Tensor:
-        """
-        Expectation value of L_z = −i ∂/∂φ in units of ħ.
+        r"""
+        Compute the expectation value of
+        :math:`L_z = -i\,\partial/\partial\varphi`, in units of :math:`\hbar`.
 
-        In the DFT basis L_z is diagonal with eigenvalue m, so
+        Cylindrical coordinates make this diagnostic almost free: in the DFT
+        basis :math:`L_z` is diagonal with eigenvalue :math:`m`, so no
+        derivative has to be evaluated at all,
 
-            ⟨L_z⟩ = Σ_m  m · ∫ |ψ_m(r,z)|² r dr dz · dphi
+        .. math::
 
-        The DFT norm='ortho' ensures |ψ_m|² sums to |ψ|² in the phi integral.
+            \langle L_z \rangle = \sum_m m
+                \int \lvert \psi_m(r, z) \rvert^{2}\,
+                r\,\mathrm{d}r\,\mathrm{d}z\;\mathrm{d}\varphi .
+
+        The ``norm='ortho'`` DFT ensures that
+        :math:`\sum_m \lvert \psi_m \rvert^{2}` reproduces
+        :math:`\lvert \psi \rvert^{2}` in the azimuthal integral.
 
         Args:
-            psi          : normalised wavefunction (n_r, n_phi, n_z).
-            m_modes      : azimuthal mode indices (n_phi,).
-            r            : radial grid.
-            dr, dphi, dz : spacings.
+            psi (torch.Tensor): Normalised wavefunction of shape
+                ``(n_r, n_phi, n_z)``.
+            m_modes (torch.Tensor): Azimuthal mode indices, of shape
+                ``(n_phi,)``.
+            r (torch.Tensor): Radial grid.
+            dr (float): Radial grid spacing.
+            dphi (float): Azimuthal grid spacing.
+            dz (float): Axial grid spacing.
 
         Returns:
-            Scalar ⟨L_z⟩.
+            torch.Tensor: Scalar expectation value
+            :math:`\langle L_z \rangle`.
         """
         r_w = r.reshape(-1, 1, 1)
         psi_m = torch.fft.fft(psi, dim=1, norm="ortho")
@@ -753,13 +989,16 @@ class GPECylindricalLibrary():
         return torch.real(Lz)
 
 class GPE2DCylindricalLibrary(GPECylindricalLibrary):
-    """
+    r"""
     Vortex imprinting and density diagnostics on a cylindrical grid.
 
-    Mirrors the Cartesian ``GPE2DLibrary(GPELibrary)`` relationship: it
-    inherits every core operator from :class:`GPECylindricalLibrary` and adds
-    the diagnostics the simulation loop reports (rms_radius, column densities,
-    radial profile) plus vortex-line imprinting.
+    Mirrors the Cartesian
+    :class:`~src.library.gpe_library.GPE2DLibrary` relationship to
+    :class:`~src.library.gpe_library.GPELibrary`: it inherits every core
+    operator from :class:`GPECylindricalLibrary` and adds the diagnostics the
+    simulation loop reports (:meth:`rms_radius`, the column densities,
+    :meth:`radial_density_profile`) plus vortex-line imprinting
+    (:meth:`create_vortices`, :meth:`check_vortex_resolution`).
     """
 
     @staticmethod
@@ -776,43 +1015,70 @@ class GPE2DCylindricalLibrary(GPECylindricalLibrary):
         dr: float = None,
         dphi: float = None,
     ) -> torch.Tensor:
-        """
-        Phase and amplitude mask for one or more vortex lines at arbitrary positions.
+        r"""
+        Build a phase-and-amplitude mask for one or more vortex lines at
+        arbitrary positions.
 
-        Each vortex runs along z.  Its core intersects the (r, φ) plane at the
-        Cartesian position (x0, y0) given in ``positions``.  The contribution of
-        vortex n to the wavefunction is:
+        Each vortex runs along :math:`z`, its core intersecting the
+        :math:`(r, \varphi)` plane at the Cartesian position
+        :math:`(x_0, y_0)`. Unlike the pure-phase Cartesian imprint, this mask
+        also suppresses the density at the core, so the state starts closer to
+        a relaxed vortex. Vortex :math:`n` contributes
 
-            d_n(r, φ)   = √[(r cos φ − x0)² + (r sin φ − y0)²]
-            amplitude_n = tanh(d_n / r_core)
-            phase_n     = q_n · atan2(r sin φ − y0, r cos φ − x0)
+        .. math::
 
-        All contributions are multiplied together:
+            d_n(r, \varphi) = \sqrt{(r\cos\varphi - x_0)^2
+                                  + (r\sin\varphi - y_0)^2},
 
-            mask = ∏_n  amplitude_n · exp(i · phase_n)
+        .. math::
 
-        A vortex at (x0, y0) = (0, 0) reduces to the on-axis case
-        tanh(r / r_core) · exp(i q φ).
+            A_n = \tanh\!\left(\frac{d_n}{r_\mathrm{core}}\right),
+            \qquad
+            \theta_n = q_n\, \mathrm{atan2}\left(
+                r\sin\varphi - y_0,\; r\cos\varphi - x_0\right),
 
-        If ``dr`` and ``dphi`` are provided, a resolution check is run and a
+        and all contributions are multiplied together,
+
+        .. math::
+
+            \text{mask} = \prod_n A_n\, e^{i\theta_n}.
+
+        A vortex at the origin reduces to the on-axis case
+        :math:`\tanh(r/r_\mathrm{core})\,e^{i q \varphi}`.
+
+        If ``dr`` and ``dphi`` are given, a resolution check is run and a
         warning is issued for any vortex whose core is under-resolved on the
-        cylindrical grid.  See ``check_vortex_resolution`` for details.
+        cylindrical grid; see :meth:`check_vortex_resolution`.
 
         Args:
-            r, phi      : 1-D cylindrical coordinate axes (lengths n_r, n_phi).
-            n_r, n_phi, n_z : grid point counts.
-            positions   : list of (x0, y0) Cartesian vortex-core positions.
-            charges     : topological charge (winding number) for each vortex.
-            r_core      : healing-length core radius (same for all vortices).
-            device      : computation device.
-            dr          : radial grid spacing (optional, enables resolution check).
-            dphi        : azimuthal grid spacing 2π/n_phi (optional, enables check).
+            r (torch.Tensor): Radial axis, of shape ``(n_r,)``.
+            phi (torch.Tensor): Azimuthal axis, of shape ``(n_phi,)``.
+            n_r (int): Number of radial grid points.
+            n_phi (int): Number of azimuthal grid points.
+            n_z (int): Number of axial grid points.
+            positions (list): Cartesian vortex-core positions
+                :math:`(x_0, y_0)`.
+            charges (list): Topological charge :math:`q` of each vortex.
+            r_core (float): Healing-length core radius, the same for all
+                vortices.
+            device (torch.device): Computation device.
+            dr (float, optional): Radial grid spacing; supplying it enables the
+                resolution check.
+            dphi (float, optional): Azimuthal grid spacing
+                :math:`2\pi / n_\varphi`; supplying it enables the resolution
+                check.
 
         Returns:
-            Complex tensor of shape (n_r, n_phi, n_z) to multiply onto ψ.
+            torch.Tensor: Complex tensor of shape ``(n_r, n_phi, n_z)`` to
+            multiply onto :math:`\psi`.
 
         Raises:
-            ValueError: If ``positions`` and ``charges`` have different lengths.
+            ValueError: If ``positions`` and ``charges`` have different
+                lengths.
+
+        Warns:
+            UserWarning: For each vortex whose core is under-resolved, when the
+                grid spacings are supplied.
         """
         if len(charges) != len(positions):
             # zip() would otherwise silently drop the surplus vortices.
@@ -864,35 +1130,42 @@ class GPE2DCylindricalLibrary(GPECylindricalLibrary):
         dphi: float,
         min_points_per_core: float = 2.0,
     ) -> list:
-        """
+        r"""
         Check whether the cylindrical grid resolves each vortex core.
 
-        At radial position r0 the effective Cartesian grid spacing is
+        A polar grid gets coarser in arc length as the radius grows, so a
+        vortex that is well resolved near the axis may not be near the edge. At
+        radial position :math:`r_0` the effective local Cartesian spacing is
+        the worse of the two directions,
 
-            dr_eff = max(dr, r0 · dφ)
+        .. math::
 
-        where ``dr`` is the radial step and ``r0 · dφ`` is the local arc-length
-        step.  The core is considered resolved when
+            \mathrm{d}r_\mathrm{eff} =
+                \max\left(\mathrm{d}r,\; r_0\,\mathrm{d}\varphi\right),
 
-            r_core / dr_eff  >=  min_points_per_core
+        and the core counts as resolved when at least
+        ``min_points_per_core`` cells span one healing length,
 
-        i.e. at least ``min_points_per_core`` grid cells span one healing length.
+        .. math::
+
+            \frac{r_\mathrm{core}}{\mathrm{d}r_\mathrm{eff}}
+                \ge n_\mathrm{min} .
 
         Args:
-            positions          : list of (x0, y0) Cartesian vortex positions.
-            r_core             : healing-length core radius.
-            dr                 : radial grid spacing.
-            dphi               : azimuthal spacing 2π / n_phi.
-            min_points_per_core: minimum required resolution ratio (default 2).
+            positions (list): Cartesian vortex positions :math:`(x_0, y_0)`.
+            r_core (float): Healing-length core radius.
+            dr (float): Radial grid spacing.
+            dphi (float): Azimuthal grid spacing :math:`2\pi / n_\varphi`.
+            min_points_per_core (float, optional): Minimum required resolution
+                ratio (default ``2.0``).
 
         Returns:
-            List of dicts, one per vortex:
-                'position'   – (x0, y0)
-                'r0'         – radial distance of the core from the axis
-                'dr_eff'     – effective local Cartesian spacing max(dr, r0·dφ)
-                'ratio'      – r_core / dr_eff  (> min_points_per_core = resolved)
-                'resolved'   – bool
-                'bottleneck' – 'azimuthal' | 'radial'
+            list[dict]: One dict per vortex, with the keys ``'position'``
+            :math:`(x_0, y_0)`; ``'r0'``, the distance of the core from the
+            axis; ``'dr_eff'``, the effective local spacing; ``'ratio'``,
+            :math:`r_\mathrm{core}/\mathrm{d}r_\mathrm{eff}`; ``'resolved'``, a
+            bool; and ``'bottleneck'``, either ``'azimuthal'`` or ``'radial'``
+            depending on which direction limits the resolution.
         """
         report = []
         for (x0, y0) in positions:
@@ -917,11 +1190,19 @@ class GPE2DCylindricalLibrary(GPECylindricalLibrary):
         psi: torch.Tensor,
         dz: float,
     ) -> torch.Tensor:
-        """
-        Column density integrated along z: n(r, φ) = ∫ |ψ|² dz.
+        r"""
+        Compute the column density integrated along the axial direction.
+
+        .. math::
+
+            n(r, \varphi) = \int \lvert \psi \rvert^{2}\,\mathrm{d}z
+
+        Args:
+            psi (torch.Tensor): Wavefunction of shape ``(n_r, n_phi, n_z)``.
+            dz (float): Axial grid spacing.
 
         Returns:
-            Tensor of shape (n_r, n_phi).
+            torch.Tensor: Column density of shape ``(n_r, n_phi)``.
         """
         return torch.sum(torch.abs(psi) ** 2, dim=2) * dz
 
@@ -931,11 +1212,23 @@ class GPE2DCylindricalLibrary(GPECylindricalLibrary):
         r: torch.Tensor,
         dr: float,
     ) -> torch.Tensor:
-        """
-        Density integrated over r (with volume weight): n(φ, z) = ∫ |ψ|² r dr.
+        r"""
+        Compute the density integrated over the radial direction.
+
+        .. math::
+
+            n(\varphi, z) = \int \lvert \psi \rvert^{2}\, r\,\mathrm{d}r
+
+        The :math:`r` weight is the cylindrical volume element, without which
+        the inner radii would be over-counted.
+
+        Args:
+            psi (torch.Tensor): Wavefunction of shape ``(n_r, n_phi, n_z)``.
+            r (torch.Tensor): Radial grid.
+            dr (float): Radial grid spacing.
 
         Returns:
-            Tensor of shape (n_phi, n_z).
+            torch.Tensor: Density of shape ``(n_phi, n_z)``.
         """
         r_w = r.reshape(-1, 1, 1)
         return torch.sum(torch.abs(psi) ** 2 * r_w, dim=0) * dr
@@ -946,11 +1239,21 @@ class GPE2DCylindricalLibrary(GPECylindricalLibrary):
         dphi: float,
         dz: float,
     ) -> torch.Tensor:
-        """
-        Azimuthally and axially integrated radial profile n(r) = ∫ |ψ|² dφ dz.
+        r"""
+        Compute the azimuthally and axially integrated radial profile.
+
+        .. math::
+
+            n(r) = \int \lvert \psi \rvert^{2}\,
+                \mathrm{d}\varphi\,\mathrm{d}z
+
+        Args:
+            psi (torch.Tensor): Wavefunction of shape ``(n_r, n_phi, n_z)``.
+            dphi (float): Azimuthal grid spacing.
+            dz (float): Axial grid spacing.
 
         Returns:
-            Tensor of shape (n_r,).
+            torch.Tensor: Radial profile of shape ``(n_r,)``.
         """
         return torch.sum(torch.abs(psi) ** 2, dim=(1, 2)) * (dphi * dz)
 
@@ -962,13 +1265,32 @@ class GPE2DCylindricalLibrary(GPECylindricalLibrary):
         dphi: float,
         dz: float,
     ) -> torch.Tensor:
-        """
-        RMS radial extent √⟨r²⟩ weighted by the cylindrical density.
+        r"""
+        Compute the RMS radial extent of the condensate.
 
-            ⟨r²⟩ = ∫ r² |ψ|² r dr dφ dz / ∫ |ψ|² r dr dφ dz
+        .. math::
+
+            \langle r^2 \rangle =
+                \frac{\int r^2 \lvert \psi \rvert^{2}\,
+                      r\,\mathrm{d}r\,\mathrm{d}\varphi\,\mathrm{d}z}
+                     {\int \lvert \psi \rvert^{2}\,
+                      r\,\mathrm{d}r\,\mathrm{d}\varphi\,\mathrm{d}z},
+            \qquad
+            r_\mathrm{rms} = \sqrt{\langle r^2 \rangle}
+
+        The volume element appears in both integrals, so the numerator carries
+        a factor :math:`r^3` — :math:`r^2` from the observable and one more
+        from :math:`\mathrm{d}V` — and the spacings cancel.
+
+        Args:
+            psi (torch.Tensor): Wavefunction of shape ``(n_r, n_phi, n_z)``.
+            r (torch.Tensor): Radial grid.
+            dr (float): Radial grid spacing.
+            dphi (float): Azimuthal grid spacing.
+            dz (float): Axial grid spacing.
 
         Returns:
-            Scalar RMS radius.
+            torch.Tensor: Scalar RMS radius.
         """
         r_w = r.reshape(-1, 1, 1)
         density = torch.abs(psi) ** 2

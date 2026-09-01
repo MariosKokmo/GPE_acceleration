@@ -1,42 +1,138 @@
+# Configuration and running
 
-## Features
-**Potentials**
+Everything a run needs is described by two JSON files: `configuration_file.json`,
+which defines the physical system and the scenarios to simulate, and
+`appConfig.json`, which controls application-level settings such as logging and
+which extra outputs are written. This guide covers installing the solver, the
+three ways to start a run, and then the complete reference for both files.
 
-**Repetitive imprinting**
+## Installation
 
-## Run
-To run the code, you simply run the `run.py` script. This script invokes any necessary function and set-up of the simulation.
+The package requires **Python 3.9–3.12** and is built on PyTorch. An NVIDIA GPU
+with CUDA support is strongly recommended, but not required — the same code runs
+on CPU.
 
-The simulations are defined in a json file called 'configuration_file.json'.
+```bash
+python -m venv venv
+# Windows
+.\venv\Scripts\activate
+# Linux/macOS
+source venv/bin/activate
 
-**Important** -- Each configuration file is strictly for one grid and potential configuration. Multiple simulations can be run in sequence but all have to be on the same grid and potential with the same ground state.
+# Install in editable mode; this also provides the `baqs` command
+pip install -e .
+```
 
-First the ground state for the specific grid is calculated (if it doesn't already exist). Then every simulation is run one after another and the results are stored in their respective folders.
+Installing from `requirements.txt` instead pins the exact versions the solver is
+verified against:
 
-The flow of the logic is as follows:
+| Package | Pinned | Accepted range |
+|---|---|---|
+| `torch` | 2.2.2 | `>=2.2,<2.5` |
+| `numpy` | 1.26.4 | `>=1.26,<2.0` |
+| `pandas` | 2.2.3 | `>=2.1,<2.3` |
+| `matplotlib` | 3.9.2 | `>=3.8,<4` |
+| `opencv-python` | 4.10.0.84 | `>=4.9` |
+
+The pinned `torch` is the CPU wheel from PyPI. For GPU runs install the build
+matching your CUDA version first — see
+[PyTorch Get Started](https://pytorch.org/get-started/locally/) — then install
+this package without letting it pull a different torch back in.
+
+## Running a simulation
+
+There are three entry points, and they all execute the same code path: both
+`run.py` and the CLI are thin wrappers around `Simulator`.
+
+### The `baqs` command line interface
+
+Available once the package is installed.
+
+```bash
+baqs <config_file> <app_config_file> [options]
+```
+
+| Argument | Description |
+|---|---|
+| `config` | Path to the simulation configuration JSON. |
+| `app` | Path to the application configuration JSON. |
+| `-c`, `--check` | Validate the configuration files without running anything. |
+| `--run` | Execute the simulations. |
+| `-v`, `--verbose` | Verbosity — `0` silent, `1` info, `2` debug (default `0`). |
+
+```bash
+# Validate the configuration only
+baqs configuration_file.json appConfig.json --check -v 1
+
+# Validate, then run
+baqs configuration_file.json appConfig.json --check --run -v 1
+```
+
+Without installing, the same CLI is reachable as a module:
+
+```bash
+python -m src.cli.baqs configuration_file.json appConfig.json -c -v 2
+```
+
+### The `run.py` script
+
+The shortest path when both configuration files sit in the working directory
+under their default names (`configuration_file.json` and `appConfig.json`):
+
+```bash
+python src/run.py
+```
+
+### The `Simulator` API
+
+The way to drive simulations programmatically — from a notebook, a parameter
+sweep, or any Python script:
+
+```python
+from src.simulator import Simulator
+
+sim = Simulator("configuration_file.json")
+
+# Inspect the parsed grid and potential before committing to a run
+print(sim.system.simulation_parameters)
+print(sim.system.uext)
+
+# Run every simulation combination defined in the config
+sim.run()
+
+# Inspect the results afterwards
+print(sim.simulations.BEC)
+```
+
+## What a run does
+
+1. Read `appConfig.json` and set up logging.
+2. Load and validate `configuration_file.json`.
+3. Compute the ground state for the grid by imaginary-time propagation — or load
+   it, if a matching file already exists.
+4. Run each simulation defined in the config, one after another, from that same
+   ground state.
+5. Write the snapshots, metadata and any requested videos to a folder per
+   simulation.
+
 <img src="static/flow.jpg">
 
-## Dependencies
-the main package dependencies are:
-- numpy:  1.23.5
-- pandas:  1.5.3
-- torch:  1.8.1
-- matplotlib:  3.7.1
+## The two configuration files
 
-The software should run for Python version >=3.7
+### `configuration_file.json`
 
-### configuration_file
-One configuration file is needed for each grid and/or potential configuration. Multiple simulations can be run using this configuration file.
- 
- **Important** : Currently only one configuration file can exist in a working directory. If different grids need to be run at the same time, then more python processes are needed that will run in different directories (i.e. copy the code in different folders and run it there)
+**One configuration file describes one grid and one potential.** The
+per-simulation keys are lists, so any number of *evolution scenarios* can be run
+in sequence on that grid — but a different grid or potential means a different
+file, since every scenario in a file shares a single ground state.
 
- The configuration file can be built for either an array of vortices or vortices that will be repetitively imprinted.
+Running two different grids at the same time therefore means two processes in
+separate working directories. Every input is validated before the simulations are
+set up; the complete reference is in the sections below.
 
- Checks on the inputs of the configuration file will be performed before setting up the simulations.
+### `appConfig.json`
 
-### appConfig.json
-
-A second file, `appConfig.json`, controls application-level settings. It is read once at startup
+The second file controls application-level settings. It is read once at startup
 and is independent of the simulation configuration.
 
 ```json
@@ -56,8 +152,6 @@ and is independent of the simulation configuration.
 | `"phase_imaging"` | bool | If `true`, save phase snapshots at every snapshot step. |
 
 ---
-
-# HOW TO CREATE THE CONFIGURATION FILE
 
 ## Coordinate system
 
@@ -386,7 +480,18 @@ in which case the number of simulations is taken from the soliton lists.
 ---
 
 ## List of available potentials
-- **harmonic** — harmonic trap with trapping frequencies from the config
-- **constant** — uniform potential across the entire grid
-- **ramp** — potential that ramps linearly from an initial to a final amplitude
-- **rampharmonic** — harmonic potential whose amplitude ramps up linearly in time
+
+`"Potential_type"` accepts the following values. The two coordinate systems share
+most of them, but not all — the last two exist on one side only.
+
+| `Potential_type` | Cartesian | Cylindrical | Description |
+|---|:---:|:---:|---|
+| `"harmonic"` | ✅ | ✅ | Harmonic trap built from the config trapping frequencies |
+| `"constant"` | ✅ | ✅ | Uniform potential across the entire grid |
+| `"ramp"` | ✅ | ✅ | Uniform potential ramped linearly from an initial to a final amplitude |
+| `"rampharmonic"` | ✅ | ✅ | Harmonic trap whose amplitude ramps linearly in time |
+| `"rotating"` | ✅ | ✅ | Rotating trap for stirring. Cartesian rotates the harmonic trap about a configurable axis; cylindrical rotates an anisotropic trap at angular frequency Ω with ellipticity ε |
+| `"gaussianbeam"` | — | ✅ | Focused Gaussian laser beam along z: a repulsive obstacle, stirring beam or barrier |
+| `"custom"` | ✅ | — | No potential is built; construct a `CustomPot` yourself and assign its shape and time dependence |
+
+All of them accept the optional absorber (CAP) keys described above.

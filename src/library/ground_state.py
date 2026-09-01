@@ -1,9 +1,32 @@
+r"""
+Ground-state solver for the GPE on a Cartesian grid.
 
-"""Utilities for computing the condensate ground state.
+The stationary state is found by imaginary-time propagation with a
+steepest-descent (gradient-flow) update. Writing the mean-field Hamiltonian in
+dimensionless units (:math:`\hbar = m = \omega_\mathrm{ho} = 1`) as
 
-The implementation uses imaginary-time propagation with a steepest-descent
-update. All heavy tensor operations are performed with PyTorch so the solver
-can run on either CPU or GPU depending on the supplied device and tensors.
+.. math::
+
+    H[\psi] = -\frac{\nabla^2}{2} + V_\mathrm{ext}(\mathbf{r})
+              + u \lvert \psi \rvert^{2},
+
+each iteration takes one step along the residual and renormalises,
+
+.. math::
+
+    \psi \leftarrow \mathcal{N}\Bigl[
+        \psi - \Delta\tau\,\bigl(H[\psi] - \mu\bigr)\psi
+    \Bigr],
+    \qquad
+    \mu = \langle \psi \lvert H \rvert \psi \rangle .
+
+Projecting out :math:`\mu` at every step is what keeps the flow inside the
+normalised manifold; the norm of the residual
+:math:`\lVert (H - \mu)\psi \rVert^{2}` is what the loop watches for
+convergence, since it vanishes exactly when :math:`\psi` is an eigenstate.
+
+All heavy tensor operations go through PyTorch, so the solver runs on CPU or
+GPU depending on the device of the supplied tensors.
 """
 import numpy as np
 import pandas as pd
@@ -13,37 +36,70 @@ from src.library.parameters import CONSTANTS
 from src.utils.read_write_utils import write_psi
 
 class GroundState:
+    r"""
+    Imaginary-time ground-state solver on a Cartesian grid.
+
+    A namespace of static methods: :meth:`find_ground_state` drives the
+    descent and writes the result to disk, :meth:`steepest_descent` performs a
+    single iteration, and :meth:`read_ground_state` loads a state back from a
+    file written by a previous run.
+    """
+
     @staticmethod
     def find_ground_state(sim_params, system, file_name, device, max_iterations=200000):
-        """Compute and persist the stationary ground-state wavefunction.
+        r"""
+        Compute and persist the stationary ground-state wavefunction.
 
-        The initial state is seeded with a Thomas-Fermi profile and refined via
-        imaginary-time steepest descent until the residual norm or relative
-        energy change reaches the stopping criterion.
+        The initial state is seeded with a Thomas-Fermi profile,
 
-        Parameters
-        ----------
-        sim_params : dict
-            Simulation configuration for the run. Only the interaction strength
-            ``u`` is read from here (falling back to the value derived from
-            :class:`CONSTANTS` when absent); the grid and potential come from
-            ``system``.
-        system : object
-            Simulation system carrying ``simulation_parameters`` and the
-            external potential in ``system.uext.potential``.
-        file_name : str
-            Output path used by :func:`write_psi` to store the converged state.
-        device : str or torch.device
-            Device on which the tensors and FFTs are evaluated.
-        max_iterations : int
-            Hard cap on descent iterations so a state that never meets the
-            tolerance cannot spin forever.
+        .. math::
 
-        Returns
-        -------
-        torch.Tensor
-            Normalized complex tensor containing the converged ground state on
-            ``device``.
+            \psi_\mathrm{TF} = \sqrt{\max(\mu_\mathrm{TF} - V_\mathrm{ext}, 0)},
+            \qquad
+            \mu_\mathrm{TF} = \frac{1}{2}
+                \left(\frac{15\,u}{4\pi}\right)^{2/5},
+
+        and refined by :meth:`steepest_descent` until the residual norm drops
+        below ``1e-5`` or the relative energy change vanishes. The imaginary
+        time step is set from the grid spacing as
+        :math:`\Delta\tau = 0.05\,(\min \mathrm{d}x)^2`, and is halved whenever
+        the energy goes *up*, which is the signature of a step that is too
+        large for the current profile.
+
+        Note:
+            Weak or absent interactions put :math:`\mu_\mathrm{TF}` below the
+            trap minimum, which makes the Thomas-Fermi profile identically
+            zero and its normalisation a field of NaNs. The seed then falls
+            back to a Gaussian, the exact non-interacting ground state of a
+            harmonic trap.
+
+        Args:
+            sim_params (dict): Simulation configuration for the run. Only the
+                interaction strength ``"u"`` is read from here, and only as a
+                fallback; the grid and the potential come from ``system``.
+            system: Simulation system carrying ``simulation_parameters`` and
+                the external potential in ``system.uext.potential``.
+            file_name (str): Output path, passed to
+                :func:`~src.utils.read_write_utils.write_psi` to store the
+                converged state.
+            device (str or torch.device): Device on which the tensors and FFTs
+                are evaluated.
+            max_iterations (int, optional): Hard cap on descent iterations, so
+                that a state which never meets the tolerance cannot spin
+                forever (default ``200000``). On reaching it the current state
+                is written anyway, with a message.
+
+        Returns:
+            torch.Tensor: Normalised complex wavefunction of shape
+            ``Grid_resolution``, on ``device``.
+
+        Raises:
+            FloatingPointError: If the energy or the residual stops being
+                finite, i.e. the descent has diverged. Without this check
+                every comparison against NaN would be false and the loop would
+                silently run to ``max_iterations``.
+            KeyError: If ``system.simulation_parameters`` is missing a grid
+                key.
         """
         params = system.simulation_parameters
         n1, n2, n3 = params["Grid_resolution"]
@@ -125,33 +181,65 @@ class GroundState:
 
     @staticmethod
     def steepest_descent(psi, dtau, p_sq, uext, d_x, u):
-        """Advance the imaginary-time solver by one steepest-descent step.
+        r"""
+        Advance the imaginary-time solver by one steepest-descent step.
 
-        Parameters
-        ----------
-        psi : torch.Tensor
-            Current condensate wavefunction. The tensor remains on its current
-            device, so passing a CUDA tensor keeps the full update on the GPU.
-        dtau : float
-            Imaginary-time step size.
-        p_sq : torch.Tensor
-            Squared momentum grid used to apply the kinetic-energy operator in
-            Fourier space.
-        uext : torch.Tensor
-            External trapping potential sampled on the spatial grid.
-        d_x : float
-            Volume element used for normalization and expectation values.
-        u : float
-            Contact-interaction strength.
+        The kinetic term is applied spectrally and the rest in real space,
 
-        Returns
-        -------
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
-            Updated normalized wavefunction, total energy estimate, residual
-            norm used as a convergence metric, and chemical potential. The
-            scalar diagnostics are returned as zero-dimensional tensors on the
-            same device as ``psi`` so callers can decide when to synchronize
-            with the host.
+        .. math::
+
+            H\psi = \mathcal{F}^{-1}\!\left[\tfrac{1}{2} p^2\,
+                        \mathcal{F}[\psi]\right]
+                    + \left(u \lvert \psi \rvert^{2}
+                        + V_\mathrm{ext}\right)\psi ,
+
+        from which the step follows as
+
+        .. math::
+
+            \mu = \mathrm{d}V \sum \psi^{*} H\psi,
+            \qquad
+            \psi \leftarrow \mathcal{N}\!\left[
+                \psi - \Delta\tau\,(H - \mu)\psi\right].
+
+        The diagnostics returned alongside are the residual norm and the
+        energy,
+
+        .. math::
+
+            \mathrm{tol} = \mathrm{d}V \sum \lvert (H - \mu)\psi \rvert^{2},
+            \qquad
+            E = \mu - \frac{u}{2}\,\mathrm{d}V \sum \lvert \psi \rvert^{4},
+
+        the energy being the chemical potential minus the interaction energy,
+        which is counted twice in :math:`\mu`.
+
+        Note:
+            :math:`H` is Hermitian, so :math:`\mu` is real and its real part is
+            taken directly. Taking the modulus instead would silently flip the
+            sign of a negative chemical potential and drive the descent the
+            wrong way.
+
+        Args:
+            psi (torch.Tensor): Current condensate wavefunction. The tensor
+                stays on its current device, so passing a CUDA tensor keeps the
+                whole update on the GPU.
+            dtau (float): Imaginary-time step size :math:`\Delta\tau`.
+            p_sq (torch.Tensor): Squared momentum grid :math:`p^2`, used to
+                apply the kinetic operator in Fourier space.
+            uext (torch.Tensor): External trapping potential sampled on the
+                spatial grid.
+            d_x (float): Volume element, used for the normalisation and the
+                expectation values.
+            u (float): Contact-interaction strength :math:`u`.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+            The updated normalised wavefunction, the total energy estimate
+            :math:`E`, the residual norm used as the convergence metric, and
+            the chemical potential :math:`\mu`. The three scalar diagnostics
+            are zero-dimensional tensors on the same device as ``psi``, so the
+            caller decides when to synchronise with the host.
         """
         dpsi = psi
         psiF = torch.fft.fftn(dpsi, norm='forward')
@@ -180,29 +268,28 @@ class GroundState:
 
     @staticmethod
     def read_ground_state(data, n1, n2, n3):
-        """Load a serialized ground-state wavefunction from disk.
+        r"""
+        Load a serialised ground-state wavefunction from disk.
 
-        Each row of the file holds ``(real_part,imag_part)`` for one grid point,
-        in row-major order over (n1, n2, n3) — the format written by
-        :func:`write_psi`.
+        Each row of the file holds ``(real_part,imag_part)`` for one grid
+        point, in row-major order over ``(n1, n2, n3)`` — the format written
+        by :func:`~src.utils.read_write_utils.write_psi`.
 
-        Parameters
-        ----------
-        data : str or path-like
-            Text file containing the complex wavefunction values.
-        n1, n2, n3 : int
-            Grid resolution used to reshape the flattened data back into the
-            simulation domain.
+        Args:
+            data (str or os.PathLike): Text file containing the complex
+                wavefunction values.
+            n1 (int): Number of grid points along the first axis.
+            n2 (int): Number of grid points along the second axis.
+            n3 (int): Number of grid points along the third axis.
 
-        Returns
-        -------
-        torch.Tensor
-            Complex tensor of shape ``(n1, n2, n3)`` on the CPU.
+        Returns:
+            torch.Tensor: Complex tensor of shape ``(n1, n2, n3)``, on the CPU.
+            Move it to the simulation device before use.
 
-        Raises
-        ------
-        ValueError
-            If the file does not hold exactly ``n1*n2*n3`` points.
+        Raises:
+            ValueError: If the file does not hold exactly ``n1*n2*n3`` points,
+                which normally means it was written for a different grid
+                resolution.
         """
         matrix = pd.read_csv(data, header=None, names=['real', 'imag'])
         matrix['real'] = matrix['real'].str.strip(' (')
