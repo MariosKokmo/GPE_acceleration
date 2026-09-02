@@ -87,7 +87,18 @@ class TestGroundState(unittest.TestCase):
 
     @unittest.skip('Fill in the hand-computed reference values for energy, mu, and tol.')
     def test_steepest_descent_matches_hand_computed_reference(self):
-        """Scaffold a regression test for exact hand-computed scalar diagnostics."""
+        """Scaffold: pin one steepest-descent step against reference values.
+
+        Skipped because the three expected values below are still None, so the
+        assertions would raise TypeError rather than fail informatively.
+
+        To finish it, compute energy, tol and mu for the fixture built by
+        _make_energy_regression_fixture from an independent implementation --
+        not by recording what the current code returns, which would pin the
+        behaviour rather than check it -- and drop the skip decorator. The
+        surrounding tests already cover shapes, dtypes, devices and the norm;
+        what is missing here is the exact arithmetic of the scalars.
+        """
         psi, p_sq, uext, d_x, interaction_strength = self._make_energy_regression_fixture()
 
         _, energy, tol, mu = GroundState.steepest_descent(
@@ -267,7 +278,13 @@ class TestCylindricalGroundState(unittest.TestCase):
 
     @unittest.skip('Fill in the hand-computed reference values for energy, mu, and tol.')
     def test_steepest_descent_matches_hand_computed_reference(self):
-        """Scaffold a regression test for exact hand-computed scalar diagnostics."""
+        """Scaffold: the cylindrical counterpart of the Cartesian reference test.
+
+        Skipped for the same reason, and needs the same work: reference values
+        for energy, tol and mu computed independently of this implementation,
+        here for the fixture from _make_cylindrical_fixture, with its r dr dphi
+        dz volume element and its per-mode radial operators.
+        """
         psi, kz, m_modes, r, eigvecs_dict, eigvals_dict, uext, dr, dphi, dz, _ = (
             self._make_cylindrical_fixture()
         )
@@ -344,12 +361,23 @@ class TestCartesianConvergence(unittest.TestCase):
                 os.remove(target)
 
     def test_converges_to_the_analytic_ground_state_energy(self):
+        """The solver reaches E = 3/2 hbar*omega_ho for a non-interacting isotropic trap.
+
+        That is the exact 3-D harmonic-oscillator ground-state energy, so this is a
+        value check rather than a self-consistency one; three decimal places is
+        what the 32-point grid supports.
+        """
         psi, _ = self._solve(self._system(self.harmonic))
         energies = gpe.calculate_energy_allocation(
             psi, self.harmonic, (self.p1, self.p2, self.p3), self.d_x, u=0.0)
         self.assertAlmostEqual(float(energies['E_total'].real), 1.5, places=3)
 
     def test_result_is_normalised(self):
+        """The returned state is normalised with the volume element included.
+
+        Every energy computed from it divides by this norm implicitly, so a state
+        that came back unnormalised would shift all of them together.
+        """
         psi, _ = self._solve(self._system(self.harmonic))
         self.assertAlmostEqual(float(self.d_x * torch.sum(torch.abs(psi) ** 2)), 1.0, places=10)
 
@@ -437,27 +465,49 @@ class TestGroundStateSerialisation(unittest.TestCase):
             os.remove(self.path)
 
     def test_round_trip_is_bit_exact(self):
+        """Random complex data survives write then read unchanged.
+
+        The writer formats with %.17g, which round-trips float64 exactly, so the
+        comparison is torch.equal rather than allclose: a state reloaded from disk
+        is meant to continue a run, not approximate it.
+        """
         torch.manual_seed(0)
         psi = torch.randn(4, 3, 5, dtype=torch.cdouble)
         write_psi(self.path, psi, 4, 3, 5)
         self.assertTrue(torch.equal(GroundState.read_ground_state(self.path, 4, 3, 5), psi))
 
     def test_row_major_ordering_is_preserved(self):
+        """The flat file is written and read back in the same row-major order.
+
+        The values are 0..23 on a (2, 3, 4) grid, so any transposition of the axes
+        shows up as a mismatch; identical values everywhere would hide it.
+        """
         psi = torch.arange(24, dtype=torch.float64).reshape(2, 3, 4).to(torch.cdouble)
         write_psi(self.path, psi, 2, 3, 4)
         self.assertTrue(torch.equal(GroundState.read_ground_state(self.path, 2, 3, 4), psi))
 
     def test_reading_with_the_wrong_grid_raises(self):
+        """Reading a file into a grid of the wrong size raises rather than reshaping.
+
+        The ground-state file name encodes the resolution, so a mismatch means the
+        cached state belongs to a different run and must not be reused.
+        """
         psi = torch.ones(2, 2, 2, dtype=torch.cdouble)
         write_psi(self.path, psi, 2, 2, 2)
         with self.assertRaises(ValueError):
             GroundState.read_ground_state(self.path, 3, 3, 3)
 
     def test_writing_a_mismatched_grid_raises(self):
+        """Writing a state whose shape disagrees with the declared grid raises."""
         with self.assertRaises(ValueError):
             write_psi(self.path, torch.ones(2, 2, 2, dtype=torch.cdouble), 3, 3, 3)
 
     def test_cylindrical_reader_shares_the_format(self):
+        """The cylindrical reader consumes the same file format as the Cartesian one.
+
+        Both geometries share write_psi, so a divergence in the reader would only
+        show up when a cylindrical run tried to reuse a cached state.
+        """
         torch.manual_seed(1)
         psi = torch.randn(3, 4, 2, dtype=torch.cdouble)
         write_psi(self.path, psi, 3, 4, 2)
@@ -465,6 +515,7 @@ class TestGroundStateSerialisation(unittest.TestCase):
         self.assertTrue(torch.equal(loaded, psi))
 
     def test_cylindrical_reader_validates_the_grid(self):
+        """The cylindrical reader rejects a size mismatch too."""
         write_psi(self.path, torch.ones(2, 2, 2, dtype=torch.cdouble), 2, 2, 2)
         with self.assertRaises(ValueError):
             CylindricalGroundState.read_ground_state(self.path, 4, 4, 4)
@@ -490,6 +541,13 @@ class TestCylindricalKineticOperator(unittest.TestCase):
         return cyl.normalize(psi, self.r, self.dr, self.dphi, self.dz)
 
     def test_matches_a_per_phi_reference_implementation(self):
+        """The vectorised kinetic operator agrees with a loop over azimuthal modes.
+
+        The reference builds the same operator the obvious way -- one eigenbasis
+        per |m|, the sqrt(r) symmetrisation applied by hand, the axial part through
+        an explicit FFT pair -- so a batching or stacking error in the fast path
+        shows up as a difference at the 1e-12 level.
+        """
         psi = self._random()
         sqrt_r = torch.sqrt(self.r)
         psi_m = torch.fft.fft(psi, dim=1, norm="ortho")
@@ -525,6 +583,12 @@ class TestCylindricalKineticOperator(unittest.TestCase):
         self.assertLess(abs(complex(left - right)), 1e-12)
 
     def test_expectation_value_is_real_and_non_negative(self):
+        """The kinetic energy of a random state is real and positive.
+
+        The operator is self-adjoint and positive semi-definite, so a complex
+        expectation value means the sqrt(r) weighting has been applied on only one
+        side of the inner product.
+        """
         psi = self._random()
         expectation = torch.sum(psi.conj() * CylindricalGroundState.apply_kinetic(
             psi, self.kz, self.m_modes, self.r, self.eigvecs, self.eigvals) * self.r_w) * self.dV
@@ -577,12 +641,23 @@ class TestCylindricalConvergence(unittest.TestCase):
                 os.remove(target)
 
     def test_result_is_normalised_with_the_cylindrical_volume_element(self):
+        """The converged state integrates to 1 under r dr dphi dz.
+
+        Normalising without the r weight leaves a state that looks fine on the grid
+        but carries the wrong atom number.
+        """
         psi, _ = self._solve(self._system(self.harmonic))
         norm = float(torch.sum(torch.abs(psi) ** 2 * self.r.reshape(-1, 1, 1))
                      * (self.dr * self.dphi * self.dz))
         self.assertAlmostEqual(norm, 1.0, places=10)
 
     def test_negative_chemical_potential_still_converges(self):
+        """A trap shifted down by a constant converges to the same state.
+
+        Subtracting 6 from the potential drives mu negative without changing the
+        physics: the density profile must match the unshifted run, since a uniform
+        offset only rescales the global phase.
+        """
         offset = self.harmonic - 6.0
         psi, _ = self._solve(self._system(offset))
         mu = cyl.calculate_chemical_potential(
@@ -592,10 +667,21 @@ class TestCylindricalConvergence(unittest.TestCase):
         self.assertTrue(torch.allclose(torch.abs(psi), torch.abs(reference), atol=1e-3))
 
     def test_iteration_cap_stops_a_run_that_cannot_converge(self):
+        """A run capped at three iterations stops and says it did not converge.
+
+        Strong interactions and a tiny cap guarantee the residual is still large,
+        so this pins the cap and its message rather than the convergence itself.
+        """
         _, log = self._solve(self._system(self.harmonic, u=200.0), max_iterations=3)
         self.assertIn("did not converge", log)
 
     def test_state_stays_axisymmetric_for_an_axisymmetric_trap(self):
+        """An axisymmetric trap gives a state with no azimuthal structure.
+
+        Every phi slice must match the first to 1e-8: the m != 0 channels are
+        driven only by the potential, so any variation here means the azimuthal
+        transform has leaked between modes.
+        """
         psi, _ = self._solve(self._system(self.harmonic))
         for j in range(1, self.n_phi):
             self.assertLess(float((torch.abs(psi[:, j, :]) - torch.abs(psi[:, 0, :])).abs().max()),

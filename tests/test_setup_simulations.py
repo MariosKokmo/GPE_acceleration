@@ -1081,7 +1081,14 @@ class TestGetSimulationParameters(unittest.TestCase):
         self.assertIn("imprint_every and imprint_times have different number", msg)
 
     def test_imprint_times_auto_generated_when_empty(self):
-        """Empty imprint_times lists are auto-filled from imprint_every and max_imprints."""
+        """Empty imprint_times lists are auto-filled from imprint_every and max_imprints.
+
+        With ``imprint_every = 5`` and ``max_imprints = 3`` the generated
+        snapshots are 5, 10 and 15. The result is asserted unconditionally: an
+        earlier version guarded the check with ``if params is not None``, so a
+        config that started being rejected would have turned this into a test
+        that silently checked nothing.
+        """
         cfg = dict(
             self.cfg,
             repetitive=1,
@@ -1090,9 +1097,9 @@ class TestGetSimulationParameters(unittest.TestCase):
             max_imprints=[3],
             imprinting_charge=[[1]],
         )
-        params, _ = self._call(cfg)
-        if params is not None:
-            self.assertEqual(params["imprint_times"][0], [5, 10, 15])
+        params, msg = self._call(cfg)
+        self.assertIsNotNone(params, msg=f"config was rejected: {msg}")
+        self.assertEqual(params["imprint_times"][0], [5, 10, 15])
 
 
 # =============================================================================

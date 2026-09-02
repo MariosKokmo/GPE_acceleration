@@ -44,6 +44,12 @@ class TestModGradPsi(unittest.TestCase):
             return (x1, x2, x3), (p1, p2, p3), (self.N1, self.N2, self.N3)
 
     def test_tensor_flat_1D(self):
+        """A constant field has zero gradient everywhere.
+
+        The edges are trimmed before comparing because the FFT treats the field as
+        periodic; a constant has no jump at the wrap point, so this case is exact
+        and the tolerance is on the absolute error rather than a relative one.
+        """
         space_grid, p_axes, n = self.setup_grids(dim=1)
         input = torch.ones_like(space_grid[0])
         grad = gpe.mod_grad_psi(input, p_axes)
@@ -54,6 +60,13 @@ class TestModGradPsi(unittest.TestCase):
         self.assertLessEqual(error, self.error_tol, msg=f"the error is not small enough")
     
     def test_tensor_1D(self):
+        """|grad sin(x)| = |cos(x)|.
+
+        mod_grad_psi returns the magnitude of the gradient in every dimension, so
+        the reference is the absolute value rather than the signed derivative. The
+        outer thirds of the axis are dropped: sin is not periodic on this window
+        and the mismatch at the wrap point rings back into the interior.
+        """
         space_grid, p_axes, n = self.setup_grids(dim=1)
         input = torch.sin(space_grid[0])
         grad = gpe.mod_grad_psi(input, p_axes)
@@ -65,6 +78,12 @@ class TestModGradPsi(unittest.TestCase):
         self.assertLessEqual(error, self.error_tol, msg=f"the error is not small enough")
 
     def test_gaussian_1D(self):
+        """|grad exp(-x^2/10)| = |x/5| exp(-x^2/10).
+
+        A Gaussian decays to nearly zero at both ends, so the periodic image adds
+        almost nothing and the spectral derivative is accurate well into the
+        relative-error regime used here.
+        """
         space_grid, p_axes, n = self.setup_grids(dim=1)
         input = torch.exp(-(space_grid[0]**2)/10)
         grad = gpe.mod_grad_psi(input, p_axes)
@@ -73,6 +92,12 @@ class TestModGradPsi(unittest.TestCase):
         self.assertLessEqual(error, self.error_tol, msg=f"the error is not small enough")
     
     def test_sinExp_1D(self):
+        """A modulated Gaussian, where the product rule mixes both terms.
+
+        sin(x) exp(-x^2/100) differentiates to
+        (cos(x) - x sin(x)/50) exp(-x^2/100); comparing against that catches a
+        derivative that is right for smooth envelopes but drops a term.
+        """
         space_grid, p_axes, n = self.setup_grids(dim=1)
         input = torch.sin(space_grid[0])*torch.exp(-space_grid[0]**2/100)
         grad = gpe.mod_grad_psi(input, p_axes)
@@ -81,6 +106,12 @@ class TestModGradPsi(unittest.TestCase):
         self.assertLessEqual(error, self.error_tol, msg=f"the error is not small enough")
 
     def test_tensor_flat_2D(self):
+        """A constant 2-D field has zero gradient, and the result keeps the input shape.
+
+        The shape assertion matters as much as the values here: the 2-D branch
+        combines two partial derivatives and a broadcasting slip would still return
+        something zero-valued.
+        """
         grid, p_axes, n = self.setup_grids(dim=2)
         space_grid = torch.meshgrid(grid[0], grid[1], indexing='ij')
         input = torch.ones_like(space_grid[0])
@@ -92,6 +123,11 @@ class TestModGradPsi(unittest.TestCase):
         self.assertLessEqual(error, self.error_tol, msg=f"the error is not small enough")
 
     def test_gaussian_2D(self):
+        """A radial Gaussian in 2-D, whose gradient magnitude is r/100 times itself.
+
+        The outer fifth of each axis is trimmed to avoid the Gibbs ringing the
+        periodic wrap produces at the box edges.
+        """
         grid, p_axes, n = self.setup_grids(dim=2)
         space_grid = torch.meshgrid(grid[0], grid[1], indexing='ij')
         input = torch.exp(-(space_grid[0]**2 + space_grid[1]**2)/200)
@@ -105,6 +141,7 @@ class TestModGradPsi(unittest.TestCase):
 
 
     def test_tensor_flat_3D(self):
+        """A constant 3-D field has zero gradient everywhere."""
         grid, p_axes, n = self.setup_grids(dim=3)
         space_grid = torch.meshgrid(grid[0], grid[1], grid[2], indexing='ij')
         input = torch.ones_like(space_grid[0])
@@ -114,6 +151,11 @@ class TestModGradPsi(unittest.TestCase):
         self.assertLessEqual(error, self.error_tol, msg=f"the error is not small enough")
 
     def test_gaussian_3D(self):
+        """A radial Gaussian in 3-D, the shape the solver actually runs on.
+
+        As in 2-D the gradient magnitude is r/100 times the field, and the outer
+        fifth of every axis is trimmed before the comparison.
+        """
         grid, p_axes, n = self.setup_grids(dim=3)
         space_grid = torch.meshgrid(grid[0], grid[1], grid[2], indexing='ij')
         input = torch.exp(-(space_grid[0]**2 + space_grid[1]**2 + space_grid[2]**2)/200)
@@ -138,6 +180,13 @@ class TestInitGrid(unittest.TestCase):
         self.dp = [2*np.pi/200, 2*np.pi/200, 2*np.pi/40]
     
     def test_init_grid(self):
+        """Every array init_grid returns has the length or shape the resolution asks
+        for.
+
+        The grid is anisotropic (256 x 256 x 32) on purpose: with a cubic grid a
+        transposed meshgrid or a swapped axis would still produce correctly shaped
+        output and go unnoticed.
+        """
         x1, x2, x3, p1, p2, p3, p_sq, space_grid, p_grid = gpe.init_grid(self.x_min, \
                                                                          dx=self.dx, dp=self.dp, \
                                                                             n1=self.N1, n2=self.N1, n3=self.N3, \
@@ -196,6 +245,11 @@ class TestCreateVortices(unittest.TestCase):
 class TestXEvolution(unittest.TestCase):
     def test_x_evolution(self):
         # Define test inputs
+        """The real-space half-step multiplies by exp(-i factor dtau utot).
+
+        Computed against the closed form on a 2x2 state, so the test pins the
+        exponent's sign and the factor of one half that makes it a *half* step.
+        """
         psi1 = torch.tensor([[1.0 + 1.0j, 2.0 + 2.0j], [3.0 + 3.0j, 4.0 + 4.0j]], dtype=torch.cdouble)
         utot1 = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
         dtau = 0.1
@@ -213,6 +267,12 @@ class TestXEvolution(unittest.TestCase):
 
 class TestPEvolution(unittest.TestCase):
     def test_p_evolution(self):
+        """The kinetic step multiplies by exp(-i dtau p^2 / 2) in momentum space.
+
+        The reference repeats the transform pair explicitly, including the
+        'forward' normalisation: a mismatched norm convention between the forward
+        and inverse transforms would rescale the state on every step.
+        """
         psi1 = torch.tensor(
             [[1.0 + 0.5j, 2.0 - 1.0j], [0.0 + 1.0j, -1.0 + 0.0j]],
             dtype=torch.cdouble,
@@ -232,6 +292,11 @@ class TestPEvolution(unittest.TestCase):
 
 class TestNormalize(unittest.TestCase):
     def test_normalize_unit_norm(self):
+        """After normalising, d_x * sum(|psi|^2) is exactly 1.
+
+        The volume element is part of the definition, so a normalisation that
+        omitted it would leave the norm off by a factor of d_x.
+        """
         phi = torch.tensor(
             [[1.0 + 1.0j, 2.0 + 0.0j], [0.5 - 0.5j, -1.0 + 2.0j]],
             dtype=torch.cdouble,
@@ -403,6 +468,12 @@ class TestGPE3DLibrary(unittest.TestCase):
         cls.d_x = cls.dx[0] * cls.dx[1] * cls.dx[2]
 
     def test_create_vortex_ring_shape_and_finite(self):
+        """A vortex ring phase has the grid's shape and no NaNs.
+
+        The phase winds around a circle of cores rather than a single line, so the
+        singularity is a whole ring; finiteness on every grid point is what shows
+        the core handling covers it.
+        """
         phase = gpe3d.create_vortex_ring(
             self.x1,
             self.x2,
@@ -451,6 +522,7 @@ class TestGPE3DLibrary(unittest.TestCase):
         self.assertTrue(torch.allclose(phase_q2, 2.0 * phase_q1, atol=1e-12, rtol=0.0))
 
     def test_create_vortex_ring_invalid_axis_raises(self):
+        """An axis outside 1-3 is rejected rather than silently defaulting."""
         with self.assertRaises(ValueError):
             gpe3d.create_vortex_ring(
                 self.x1,
@@ -465,6 +537,7 @@ class TestGPE3DLibrary(unittest.TestCase):
             )
 
     def test_create_vortex_lines_shape_and_finite(self):
+        """Straight vortex lines produce a finite phase of the grid's shape."""
         phase = gpe3d.create_vortex_lines(
             self.x1,
             self.x2,
@@ -481,6 +554,7 @@ class TestGPE3DLibrary(unittest.TestCase):
         self.assertTrue(torch.all(torch.isfinite(phase)))
 
     def test_create_vortex_lines_invalid_axis_raises(self):
+        """An axis outside 1-3 is rejected for vortex lines too."""
         with self.assertRaises(ValueError):
             gpe3d.create_vortex_lines(
                 self.x1,
@@ -495,6 +569,12 @@ class TestGPE3DLibrary(unittest.TestCase):
             )
 
     def test_column_density_for_uniform_state(self):
+        """Integrating a uniform state along one axis gives that axis's length.
+
+        With |psi|^2 = 1 everywhere the bare sum along axis k is exactly n_k, so
+        each of the three reductions has a different expected value -- which is
+        what distinguishes them from a routine that always reduced the same axis.
+        """
         psi = torch.ones((self.n1, self.n2, self.n3), dtype=torch.cdouble)
         col1 = gpe3d.column_density(psi, axis=1)
         col2 = gpe3d.column_density(psi, axis=2)
@@ -508,11 +588,18 @@ class TestGPE3DLibrary(unittest.TestCase):
         self.assertTrue(torch.allclose(col3, torch.full_like(col3, self.n3, dtype=torch.float64)))
 
     def test_column_density_invalid_axis_raises(self):
+        """An out-of-range axis is rejected."""
         psi = torch.ones((self.n1, self.n2, self.n3), dtype=torch.cdouble)
         with self.assertRaises(ValueError):
             gpe3d.column_density(psi, axis=5)
 
     def test_cross_section_plane_default_and_index(self):
+        """A cross-section defaults to the midplane and honours an explicit index.
+
+        The density is a ramp, so every slice differs from every other; slicing the
+        wrong index would return a plane with different values rather than an
+        equally plausible one.
+        """
         density = torch.arange(self.n1 * self.n2 * self.n3, dtype=torch.float64).reshape(self.n1, self.n2, self.n3)
         psi = torch.sqrt(density).to(torch.cdouble)
 
@@ -525,11 +612,13 @@ class TestGPE3DLibrary(unittest.TestCase):
         self.assertTrue(torch.allclose(explicit_slice, density[:, 3, :]))
 
     def test_cross_section_plane_invalid_axis_raises(self):
+        """A negative axis is rejected rather than wrapping around like a Python index."""
         psi = torch.ones((self.n1, self.n2, self.n3), dtype=torch.cdouble)
         with self.assertRaises(ValueError):
             gpe3d.cross_section_plane(psi, axis=-1)
 
     def test_calculate_velocity3d_zero_for_constant_phase(self):
+        """A state with a constant phase is at rest in all three components."""
         psi = torch.ones((self.n1, self.n2, self.n3), dtype=torch.cdouble)
         v1, v2, v3 = gpe3d.calculate_velocity3D(psi, self.p_grid)
         self.assertTrue(torch.allclose(v1, torch.zeros_like(v1), atol=1e-12))
@@ -537,6 +626,11 @@ class TestGPE3DLibrary(unittest.TestCase):
         self.assertTrue(torch.allclose(v3, torch.zeros_like(v3), atol=1e-12))
 
     def test_calculate_velocity3d_plane_wave_x(self):
+        """A plane wave exp(i kx x) moves at velocity kx along x and nowhere else.
+
+        kx is taken from the momentum axis so the wave is exactly representable on
+        the grid; an arbitrary wavenumber would alias and blur the comparison.
+        """
         gx, _, _ = self.space_grid
         # p1 is the 1-D momentum axis; element [1] is the first non-zero mode.
         kx = self.p1[1].item()
@@ -548,6 +642,11 @@ class TestGPE3DLibrary(unittest.TestCase):
         self.assertAlmostEqual(torch.mean(v3).item(), 0.0, places=6)
 
     def test_angular_momentum_zero_for_real_symmetric_state(self):
+        """A real, spherically symmetric state carries no angular momentum.
+
+        All three components are checked: a routine that computed the same
+        component three times would pass a single-component test.
+        """
         gx, gy, gz = self.space_grid
         psi_real = torch.exp(-(gx**2 + gy**2 + gz**2) / 3.0)
         psi = gpe.normalize(psi_real.to(torch.cdouble), d_x=np.prod(self.dx))
@@ -561,6 +660,7 @@ class TestGPE3DLibrary(unittest.TestCase):
         self.assertAlmostEqual(l3.item(), 0.0, places=6)
 
     def test_angular_momentum_invalid_component_raises(self):
+        """Components are numbered 1-3, so 0 is rejected."""
         psi = torch.ones((self.n1, self.n2, self.n3), dtype=torch.cdouble)
         with self.assertRaises(ValueError):
             gpe3d.angular_momentum(psi, self.space_grid, self.p_grid, component=0, d_x=self.d_x)

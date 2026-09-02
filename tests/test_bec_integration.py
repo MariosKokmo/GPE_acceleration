@@ -132,16 +132,33 @@ class TempWorkdirCase(unittest.TestCase):
 
 class TestCartesianSimulationLoop(TempWorkdirCase):
     def test_loop_runs_and_keeps_the_state_finite(self):
+        """The default template loop runs to completion without producing NaNs.
+
+        The broadest smoke test in the file: it covers parameter initialisation,
+        the split step, the snapshot writes and the potential update in one pass.
+        """
         bec = self.run_loop(self.build(make_cartesian_system()))
         self.assertTrue(bool(torch.all(torch.isfinite(torch.abs(bec.psi)))))
 
     def test_snapshots_are_recorded(self):
+        """Exactly `shots` snapshots are recorded over `kmax` iterations.
+
+        With kmax=8 and shots=2 the interval is 4, giving frames at iterations 0
+        and 4. The count guards both ends: an off-by-one in the interval would
+        produce three, and a `count < shots` slip would produce one.
+        """
         system = make_cartesian_system(kmax=8, shots=2)
         bec = self.run_loop(self.build(system))
         self.assertEqual(len(bec.rms_measurements), 2)
         self.assertEqual(len(bec.energies), 2)
 
     def test_snapshot_diagnostics_are_finite_and_sane(self):
+        """Every recorded RMS radius and energy term is finite, and the radius is
+        positive.
+
+        A zero or negative RMS radius means the volume element or the centre
+        offset has been lost, which is the failure mode this catches.
+        """
         bec = self.run_loop(self.build(make_cartesian_system()))
         for rms in bec.rms_measurements.values():
             self.assertTrue(bool(torch.isfinite(rms)))
@@ -165,6 +182,11 @@ class TestCartesianSimulationLoop(TempWorkdirCase):
         self.assertEqual(tuple(bec.cross_line.shape), (bec.shots, 16))
 
     def test_number_is_conserved_without_losses(self):
+        """With k3 = 0 the propagator is unitary, so the norm stays at 1.
+
+        The loop deliberately does not renormalise, so this is a real check on the
+        split step rather than on a rescaling applied afterwards.
+        """
         system = make_cartesian_system(k3=0.0)
         bec = self.run_loop(self.build(system))
         norm = float(bec.d_x * torch.sum(torch.abs(bec.psi) ** 2))
@@ -180,6 +202,7 @@ class TestCartesianSimulationLoop(TempWorkdirCase):
         self.assertGreater(norm, 0.0)
 
     def test_loss_rate_is_read_from_the_configuration(self):
+        """k3 is taken from the simulation parameters rather than hard-coded."""
         system = make_cartesian_system(k3=123.0)
         self.assertEqual(self.build(system).k3, 123.0)
 
@@ -193,11 +216,18 @@ class TestCartesianSimulationLoop(TempWorkdirCase):
             float(bec.d_x * torch.sum(torch.abs(bec.psi) ** 2)), 1.0, places=9)
 
     def test_stronger_loss_removes_more_atoms(self):
+        """A larger k3 leaves fewer atoms after the same number of steps.
+
+        The comparison is strict: comparing against ``sorted(reverse=True)``
+        alone would also accept three identical norms, i.e. a loss term that
+        was silently doing nothing.
+        """
         norms = []
         for k3 in (0.0, 200.0, 800.0):
             bec = self.run_loop(self.build(make_cartesian_system(kmax=40, shots=1, k3=k3)))
             norms.append(float(bec.d_x * torch.sum(torch.abs(bec.psi) ** 2)))
-        self.assertEqual(norms, sorted(norms, reverse=True))
+        for stronger, weaker in zip(norms, norms[1:]):
+            self.assertGreater(stronger, weaker, msg=f"not decreasing in k3: {norms}")
 
     def test_loss_removes_density_fastest_at_the_peak(self):
         """The rate goes as |psi|^4, so the densest region decays fastest."""
@@ -211,10 +241,20 @@ class TestCartesianSimulationLoop(TempWorkdirCase):
                         float(after[edge] / before[edge]))
 
     def test_snapshot_files_are_written(self):
+        """The first snapshot lands on disk under the expected name.
+
+        The writers emit into the working directory, which the fixture has already
+        moved to a scratch folder.
+        """
         self.run_loop(self.build(make_cartesian_system()))
         self.assertTrue(os.path.exists('R-000-cd.dat'))
 
     def test_final_outputs_are_written(self):
+        """The end-of-run writer produces the cross-section CSV and the energy file.
+
+        _write_simulation_outputs is called explicitly because the loop itself does
+        not call it; evolve() does, and that is the path being stood in for here.
+        """
         bec = self.run_loop(self.build(make_cartesian_system()))
         with contextlib.redirect_stdout(io.StringIO()):
             bec._write_simulation_outputs()
@@ -222,6 +262,13 @@ class TestCartesianSimulationLoop(TempWorkdirCase):
         self.assertTrue(os.path.exists('energies.txt'))
 
     def test_dark_soliton_imprint_runs_from_the_loop(self):
+        """A configured soliton is imprinted from inside the loop, once.
+
+        The flags are checked either side of the run: enabled after parameter
+        initialisation, imprinted after the loop reaches the configured snapshot.
+        The state must also stay finite, since the imprint multiplies psi by a
+        tanh profile that a sign error would drive negative.
+        """
         system = make_cartesian_system(kmax=8, shots=2)
         bec = self.build(system, parameters={
             "dark_soliton": True, "soliton_positions": [0.0],
@@ -243,10 +290,18 @@ class TestCylindricalSimulationLoop(TempWorkdirCase):
     """
 
     def test_loop_runs_and_keeps_the_state_finite(self):
+        """The cylindrical loop runs to completion without producing NaNs."""
         bec = self.run_loop(self.build(make_cylindrical_system()))
         self.assertTrue(bool(torch.all(torch.isfinite(torch.abs(bec.psi)))))
 
     def test_grid_and_radial_operators_are_built_from_the_parameters(self):
+        """BaseBEC builds the radial grid and eigendecomposition itself when the
+        system does not carry them.
+
+        The fixture deliberately omits `system.r`, so this is the path a real
+        cylindrical run takes. The m = 0 operator must be a full (n_r, n_r) matrix:
+        one eigenbasis per azimuthal mode is what replaces the FFT in r.
+        """
         bec = self.build(make_cylindrical_system())
         self.assertEqual(bec.r.shape, (bec.n_r,))
         self.assertIn(0, bec.eigvecs_dict)
@@ -260,6 +315,11 @@ class TestCylindricalSimulationLoop(TempWorkdirCase):
         self.assertEqual(len(bec.energies), 2)
 
     def test_snapshot_diagnostics_are_finite_and_sane(self):
+        """The cylindrical snapshot diagnostics are finite and the radius positive.
+
+        The RMS radius here carries the r dr dphi dz volume element, which is the
+        part that differs from the Cartesian writer.
+        """
         bec = self.run_loop(self.build(make_cylindrical_system()))
         for rms in bec.rms_measurements.values():
             self.assertTrue(bool(torch.isfinite(rms)))
@@ -268,21 +328,36 @@ class TestCylindricalSimulationLoop(TempWorkdirCase):
             self.assertTrue(bool(torch.isfinite(torch.as_tensor(entry['E_total']).real)))
 
     def test_radial_profile_fills_the_cross_line_buffer(self):
+        """The cross-section buffer is (shots, n_r) and holds a non-empty profile.
+
+        In cylindrical geometry the stored profile is n(r) at the z midplane, so
+        its length is n_r rather than the n1 of the Cartesian case.
+        """
         bec = self.run_loop(self.build(make_cylindrical_system()))
         self.assertEqual(tuple(bec.cross_line.shape), (bec.shots, bec.n_r))
         self.assertGreater(float(bec.cross_line[0].sum()), 0.0)
 
     def test_number_is_conserved_by_the_cylindrical_step(self):
+        """The cylindrical propagator conserves the norm computed with r dr dphi dz.
+
+        The radial kinetic operator is applied through a precomputed
+        eigendecomposition rather than an FFT, so unitarity is a property of that
+        decomposition and worth pinning separately from the Cartesian case.
+        """
         bec = self.run_loop(self.build(make_cylindrical_system()))
         norm = float(torch.sum(torch.abs(bec.psi) ** 2 * bec.r.reshape(-1, 1, 1))
                      * (bec.dr * bec.dphi * bec.dz))
         self.assertAlmostEqual(norm, 1.0, places=8)
 
     def test_snapshot_files_are_written(self):
+        """The cylindrical writer emits its first snapshot file under the same name
+        as the Cartesian one, so the video helpers can read either.
+        """
         self.run_loop(self.build(make_cylindrical_system()))
         self.assertTrue(os.path.exists('R-000-cd.dat'))
 
     def test_final_outputs_are_written(self):
+        """The end-of-run outputs are produced for cylindrical runs too."""
         bec = self.run_loop(self.build(make_cylindrical_system()))
         with contextlib.redirect_stdout(io.StringIO()):
             bec._write_simulation_outputs()
@@ -290,6 +365,11 @@ class TestCylindricalSimulationLoop(TempWorkdirCase):
         self.assertTrue(os.path.exists('energies.txt'))
 
     def test_solitons_are_declined_for_cylindrical_grids(self):
+        """Soliton configuration is refused, with a warning, on a cylindrical grid.
+
+        The soliton helpers exist only for Cartesian geometry, so the flag has to
+        be switched off at parameter time rather than failing later inside the loop.
+        """
         bec = self.build(make_cylindrical_system(), parameters={
             "dark_soliton": True, "soliton_positions": [0.0],
             "soliton_widths": [1.0], "soliton_axes": [3],
@@ -301,6 +381,11 @@ class TestFiniteTempSimulationLoop(TempWorkdirCase):
     """SGPE runs in both coordinate systems."""
 
     def test_cartesian_loop_runs_at_zero_temperature(self):
+        """At T = 0 the SGPE reduces to a damped GPE and still runs cleanly.
+
+        With no noise term the evolution is deterministic, which is the mode used
+        for relaxing a state towards the ground state.
+        """
         system = make_cartesian_system(kmax=8, shots=2)
         bec = self.build(system, cls=FiniteTempBEC,
                          parameters={"temperature": 0.0, "damping_coefficient": 0.05})
@@ -308,6 +393,7 @@ class TestFiniteTempSimulationLoop(TempWorkdirCase):
         self.assertTrue(bool(torch.all(torch.isfinite(torch.abs(bec.psi)))))
 
     def test_cartesian_loop_runs_with_thermal_noise(self):
+        """At T > 0 the noise term is active and the run stays finite."""
         system = make_cartesian_system(kmax=8, shots=2)
         bec = self.build(system, cls=FiniteTempBEC,
                          parameters={"temperature": 0.5, "damping_coefficient": 0.05})
@@ -315,6 +401,9 @@ class TestFiniteTempSimulationLoop(TempWorkdirCase):
         self.assertTrue(bool(torch.all(torch.isfinite(torch.abs(bec.psi)))))
 
     def test_cylindrical_loop_runs_with_thermal_noise(self):
+        """The same SGPE loop runs on a cylindrical grid, where the noise has to be
+        built with the cylindrical volume element.
+        """
         system = make_cylindrical_system(kmax=8, shots=2)
         bec = self.build(system, cls=FiniteTempBEC,
                          parameters={"temperature": 0.5, "damping_coefficient": 0.05})
@@ -322,6 +411,13 @@ class TestFiniteTempSimulationLoop(TempWorkdirCase):
         self.assertTrue(bool(torch.all(torch.isfinite(torch.abs(bec.psi)))))
 
     def test_chemical_potential_is_computed_from_the_initial_state(self):
+        """mu starts unset and is filled in from the ground state on the first
+        iteration.
+
+        The bounds are a scale check rather than a precise value: a mu built
+        without the volume element would come out around 1/d_x, orders of
+        magnitude larger than the few units of hbar*omega_ho expected here.
+        """
         system = make_cartesian_system(kmax=8, shots=1)
         bec = self.build(system, cls=FiniteTempBEC,
                          parameters={"temperature": 0.0, "damping_coefficient": 0.05})
@@ -333,6 +429,7 @@ class TestFiniteTempSimulationLoop(TempWorkdirCase):
         self.assertLess(bec.mu, 50.0)
 
     def test_configured_chemical_potential_is_respected(self):
+        """A mu supplied in the configuration is used unchanged, not recomputed."""
         system = make_cartesian_system(kmax=4, shots=1)
         bec = self.build(system, cls=FiniteTempBEC, parameters={
             "temperature": 0.0, "damping_coefficient": 0.05,
@@ -372,6 +469,11 @@ class TestFiniteTempSimulationLoop(TempWorkdirCase):
         self.assertGreater(norm, 0.0)
 
     def test_losses_also_apply_in_cylindrical_geometry(self):
+        """Three-body loss removes atoms on a cylindrical grid too.
+
+        The norm is computed with r dr dphi dz; the loss operator itself is
+        geometry-independent, but it is applied around a different propagator.
+        """
         system = make_cylindrical_system(kmax=40, shots=1)
         system.simulation_parameters["k3"] = 500.0
         bec = self.build(system, cls=FiniteTempBEC, parameters={
@@ -384,6 +486,11 @@ class TestFiniteTempSimulationLoop(TempWorkdirCase):
         self.assertGreater(norm, 0.0)
 
     def test_loss_is_disabled_when_k3_is_zero(self):
+        """With k3 = 0 and no damping the SGPE conserves the atom number.
+
+        This is the control for the loss tests above: it shows that the norm they
+        see falling is the loss operator's doing and not the propagator's.
+        """
         system = make_cartesian_system(kmax=40, shots=1, k3=0.0)
         bec = self.build(system, cls=FiniteTempBEC, parameters={
             "temperature": 0.0, "damping_coefficient": 0.0,
@@ -467,6 +574,11 @@ class TestLegacyBECLosses(TempWorkdirCase):
         self.assertGreater(norm, 0.0)
 
     def test_number_is_conserved_when_losses_are_disabled(self):
+        """The legacy BEC model conserves the norm when k3 = 0.
+
+        Control case for the loss test above, and a check that folding a zero loss
+        rate into utot leaves the potential real.
+        """
         bec = self._build_legacy(k3=0.0)
         with contextlib.redirect_stdout(io.StringIO()):
             bec._main_simulation_loop()
@@ -490,12 +602,24 @@ class TestLibrarySelection(TempWorkdirCase):
     """Both coordinate systems must bind every library the loop uses."""
 
     def test_cartesian_bindings(self):
+        """A Cartesian BEC binds the three libraries the loop calls into.
+
+        _lib drives the propagator, _gpe2d_lib the snapshot diagnostics and _gs_lib
+        the ground-state search; each is checked through a method the loop actually
+        uses.
+        """
         bec = self.build(make_cartesian_system())
         self.assertTrue(hasattr(bec._lib, 'split_step_step'))
         self.assertTrue(hasattr(bec._gpe2d_lib, 'rms_radius'))
         self.assertTrue(hasattr(bec._gs_lib, 'find_ground_state'))
 
     def test_cylindrical_bindings(self):
+        """A cylindrical BEC binds the cylindrical equivalents of the same three.
+
+        rms_radius is called out because it lives on the 2-D subclass in both
+        coordinate systems, and binding the base class instead is what previously
+        broke every cylindrical snapshot.
+        """
         bec = self.build(make_cylindrical_system())
         self.assertTrue(hasattr(bec._lib, 'split_step_step'))
         self.assertTrue(hasattr(bec._gpe2d_lib, 'rms_radius'),
@@ -503,6 +627,13 @@ class TestLibrarySelection(TempWorkdirCase):
         self.assertTrue(hasattr(bec._gs_lib, 'find_ground_state'))
 
     def test_every_library_call_made_by_the_snapshot_writers_resolves(self):
+        """Both coordinate systems expose every _lib method the models call.
+
+        The names are the ones reached from the loops and the snapshot writers. A
+        method missing from one geometry raises only when that code path runs,
+        which in practice meant only when a long simulation reached its first
+        snapshot.
+        """
         for build in (make_cartesian_system, make_cylindrical_system):
             bec = self.build(build())
             for name in ('calculate_energy_allocation', 'normalize', 'sgpe_step',

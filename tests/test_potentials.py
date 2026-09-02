@@ -376,6 +376,11 @@ class TestAbsorberPotential(unittest.TestCase):
         }
 
     def test_absorber_optional_by_default(self):
+        """Without the Absorber_* keys the potential stays purely real.
+
+        A complex potential is what makes the propagator non-unitary, so a trap
+        that silently acquired an imaginary part would leak atoms in every run.
+        """
         potential = HarmonicPot(self.app, amplitude=1.0, **self.simulation_parameters)
         self.assertIsNone(potential.absorber_potential)
 
@@ -383,6 +388,14 @@ class TestAbsorberPotential(unittest.TestCase):
         self.assertFalse(torch.is_complex(evolved))
 
     def test_absorber_adds_imaginary_damping_near_edges(self):
+        """With the absorber on, the potential gains a non-positive imaginary part
+        that is strongest at the boundary.
+
+        The trap amplitude is set to zero so the imaginary part is the absorber's
+        doing alone. Damping means a negative imaginary part; the edge cell must
+        be more strongly damped than the centre, which is where the profile is
+        supposed to vanish.
+        """
         params = {
             **self.simulation_parameters,
             "Absorber_enabled": True,
@@ -404,6 +417,12 @@ class TestAbsorberPotential(unittest.TestCase):
         self.assertLess(edge, center)
 
     def test_absorber_time_ramp(self):
+        """The absorber ramps in linearly between Absorber_tinit and Absorber_tfinal.
+
+        Before tinit=0.5 it is exactly off, at t=1.0 it is partly on, and by t=2.0,
+        past tfinal=1.5, it is at full strength. Sampling all three points is what
+        distinguishes a ramp from a switch that is simply on.
+        """
         params = {
             **self.simulation_parameters,
             "Absorber_enabled": True,

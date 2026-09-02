@@ -31,6 +31,14 @@ def _make_bec(n1=32, n2=4, n3=32):
 
 class TestBEC(unittest.TestCase):
     def test_create_vortex_list_single(self):
+        """One simulation, three imprint times, one charge-1 vortex at the origin
+        each time.
+
+        The vortex list is keyed by imprint time, so the keys must be exactly the
+        times that were asked for. The phase cache is keyed by (x, y, charge)
+        instead, so three identical imprints collapse to a single cached phase --
+        the expected keys are therefore the *unique* imprints, not one per time.
+        """
         bec = _make_bec()
 
         # One simulation (outer list of length 1) with three imprint times,
@@ -55,6 +63,13 @@ class TestBEC(unittest.TestCase):
         self.assertEqual(set(bec.all_phases.keys()), expected_keys)
 
     def test_create_vortex_list_multiple(self):
+        """One simulation whose two imprint times hold different numbers of vortices.
+
+        The first time imprints two vortices and the second imprints one, so the
+        per-time arrays are (3, 2) and (3, 1): three rows of x, y and charge, one
+        column per vortex. Plain Python lists are used rather than a numpy array
+        because this ragged shape is what numpy >= 1.24 refuses to build.
+        """
         bec = _make_bec()
 
         # One simulation with two imprint times: the first imprints two
@@ -96,6 +111,11 @@ class TestBECPhaseOps(unittest.TestCase):
         self.bec.psi = torch.ones(self.shape, dtype=torch.cdouble)
 
     def test_repetitive_imprint_applies_phase(self):
+        """Imprinting multiplies the state by exp(i*phase), leaving the density alone.
+
+        Starting from a uniform psi makes the expected result exact rather than
+        approximate, so the comparison can be a strict allclose.
+        """
         phase = torch.full(self.shape, 0.5, dtype=torch.float64)
         before = self.bec.psi.clone()
         self.bec._repetitive_imprint(phase)
@@ -103,6 +123,13 @@ class TestBECPhaseOps(unittest.TestCase):
         self.assertTrue(torch.allclose(self.bec.psi, expected))
 
     def test_extract_phase_runs(self):
+        """Extracting the phase of a pure phase factor returns a real, finite field of
+        the same shape.
+
+        This covers the call plumbing rather than the numerics: the helper lives on
+        CommonUtils and used to be invoked on GPELibrary, which raised
+        AttributeError at runtime.
+        """
         self.bec.psi = torch.exp(
             1j * torch.full(self.shape, 0.3, dtype=torch.float64)
         ).to(torch.cdouble)
@@ -111,6 +138,12 @@ class TestBECPhaseOps(unittest.TestCase):
         self.assertTrue(torch.all(torch.isfinite(phase)))
 
     def test_imprint_vortices_runs(self):
+        """Imprinting a charge-1 vortex at the origin leaves the state finite.
+
+        The phase winds by 2*pi around the core, and the winding itself is checked
+        in the library tests; what matters here is that the model's call into the
+        vortex helpers resolves and produces no NaNs.
+        """
         vortices = np.array([[0], [0], [1]])  # one charge-1 vortex at the origin
         self.bec._imprint_vortices(vortices)
         self.assertEqual(self.bec.psi.shape, self.shape)
